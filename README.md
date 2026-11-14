@@ -1,28 +1,58 @@
-# 万象智控 Android 最小客户端
+# 万象智控 Android 设备端（升级版）
 
-这是与 `eclipseorc/wanxiang-server` 协议匹配的原生 Android Java 示例：通过设备 Token 获取一次性 WebSocket ticket，保持设备控制连接，响应管理员观看请求；每次屏幕共享均需设备用户确认 Android 系统 MediaProjection 授权。服务端只转发 WebRTC 信令，不承载视频流。
+本版本在最小可运行版基础上做了升级，重点强化了：
 
-## 构建
+- 更稳定的 WebSocket 生命周期管理
+- 更明确的 `watch-request` / `watch-stop` 流程处理
+- 更安全的 `MediaProjection` 同意与清理
+- 更可靠的 `PeerConnection`/ICE 的 offer/answer 处理
+- 屏幕共享前台通知，减少 Android 12+ 后台限制导致的终止风险
 
-使用 Android Studio 打开仓库根目录，安装 Android SDK 35 和 JDK 17，然后运行 `app` 配置。或在安装 Android SDK/Gradle 的环境中执行：
+## 关键改进
 
-```sh
-gradle assembleDebug
-```
+1. 连接流程
+   - 使用设备 Token 获取一次性 WebSocket ticket
+   - 连接成功后等待管理员 `watch-request`
+   - 支持用户手动断开连接和服务端断开连接
 
-生成 APK：`app/build/outputs/apk/debug/app-debug.apk`。
+2. 屏幕共享同意
+   - 设备端在收到 `watch-request` 后弹出确认对话框
+   - 用户确认后才调用 `MediaProjectionManager.createScreenCaptureIntent()`
+   - 取消/拒绝时发送 `watch-denied`
 
-## 连接步骤
+3. WebRTC 处理
+   - 创建 `PeerConnection`
+   - 采集屏幕并创建 VideoTrack
+   - 发送 offer，并处理 answer 与 candidate
+   - 正确处理 `watch-stop` 和连接失效时的清理
 
-1. 服务端启动 HTTP 和 WebSocket 服务，浏览器管理后台创建设备，复制 `deviceId` 与仅显示一次的设备 Token。
-2. Android 客户端填写 HTTP API 地址（如 `https://control.example.com`）、设备 WebSocket 地址（如 `wss://relay.example.com/ws/device`）、设备 ID 和 Token，点击“连接服务器”。本机调试可使用 `http://10.0.2.2:8080` 和 `ws://10.0.2.2:8081/ws/device`（Android Emulator 访问宿主机）；真机使用开发机局域网 IP。
-3. 管理后台对该设备发起“查看屏幕”。设备显示请求说明和系统授权弹窗；只有明确同意后才开始采集。
-4. 用户可在设备端点击“断开连接”，管理员可结束观看。结束观看只停止屏幕采集，设备连接仍保持在线。
+4. 后台保活
+   - 使用 `ProjectionForegroundService` 作为前台服务，保证共享期间不会被系统过早终止
 
-WebRTC 初始使用公共 STUN，仅适合联调；企业网络通常需要自建 TURN，并在 Android 与 `web/index.html` 同时配置正确的 ICE servers。不要把 TURN 长期凭据提交到仓库。生产必须使用 HTTPS/WSS；Manifest 为方便本地开发开启了 cleartext traffic，发布前应移除并用 TLS。
+## 运行要求
 
-## 注意
+- Android Studio Jellyfish / 2024 及以上
+- Android SDK 35
+- JDK 17
+- `org.webrtc:google-webrtc` 依赖
 
-- 屏幕采集需设备使用者逐次确认系统 MediaProjection 授权，Android 系统会显示共享提示/持续通知；拒绝时不会启动采集。
-- 此工程是最小联调样例，不含生产级自动重连、令牌安全存储、厂商后台保活适配、设备策略管理或 TURN 凭据服务。
-- `battery` 当前示例上报 0；正式客户端应使用 `BatteryManager` 读取电量。
+## 使用方式
+
+1. 启动后端服务：`eclipseorc/wanxiang-server`
+2. 在管理后台创建设备并复制 `deviceId` / `deviceToken`
+3. 在 Android 客户端中填入：
+   - HTTP API 地址，例如 `http://10.0.2.2:8080`
+   - WebSocket 地址，例如 `ws://10.0.2.2:8081/ws/device`
+   - 设备 ID
+   - 设备 Token
+4. 点击“连接设备服务”
+5. 后台管理员发起“查看屏幕”后，设备端弹出授权提示
+6. 点“授权并开始”，系统弹出屏幕捕获授权
+7. 授权后，WebRTC 开始协商并发送屏幕流
+
+## 注意事项
+
+- 正式环境必须用 HTTPS/WSS，不建议公开暴露 WebSocket
+- 生产环境建议接入 TURN，保证 NAT/防火墙环境下也能完成 ICE 连接
+- 此示例是“最小客户端增强版”，适合联调和功能验证，不替代完整的设备管理/安全策略实现
+
