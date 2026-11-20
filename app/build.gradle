@@ -16,7 +16,14 @@ android {
 }
 
 dependencies {
-    implementation 'org.webrtc:google-webrtc:1.0.32006'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'androidx.core:core:1.15.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // 轻量级纯 Java/Android ADB 协议库（支持 Android 11+ 无线调试配对）
+    implementation 'com.github.MuntashirAkon:libadb-android:3.1.1'
+    // 生成 ADB 认证所需的 X509 证书（sun.security.x509 的 Android 移植）
+    implementation 'com.github.MuntashirAkon:sun-security-android:1.1'
+    // ADB 配对 TLS 握手所需的 Conscrypt 实现
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
 }

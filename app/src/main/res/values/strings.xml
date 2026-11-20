@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">万象设备端</string>
+    <string name="auto_adb_accessibility_desc">自动进开发者选项点「无线调试」开关并读取配对码，在设备本地完成配对并固化 5555 端口，用于共享测试设备重启后免人工恢复远程控制。</string>
+</resources>

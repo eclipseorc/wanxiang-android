@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // libadb-android / sun-security-android 通过 JitPack 发布
+        maven { url "https://jitpack.io" }
     }
 }
 rootProject.name = "WanxiangAndroid"

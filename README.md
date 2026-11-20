@@ -1,58 +1,45 @@
-# 万象智控 Android 设备端（升级版）
+# 万象智控 Android 设备端
 
-本版本在最小可运行版基础上做了升级，重点强化了：
+设备端客户端：本地生成 deviceId 作为唯一凭证，向服务端换一次性 WebSocket ticket 后建立连接，并周期上报心跳（电量、RTT、状态），供管理后台展示设备在线与运行状态。
 
-- 更稳定的 WebSocket 生命周期管理
-- 更明确的 `watch-request` / `watch-stop` 流程处理
-- 更安全的 `MediaProjection` 同意与清理
-- 更可靠的 `PeerConnection`/ICE 的 offer/answer 处理
-- 屏幕共享前台通知，减少 Android 12+ 后台限制导致的终止风险
+## 功能
 
-## 关键改进
+1. **配置页**：分别填写 Web 服务器地址/端口、WebSocket 服务器地址/端口，配置持久化到本地，下次启动自动回填。
+2. **设备标识**：deviceId 由 App 首次启动时自动生成（UUID）并持久化，界面只读显示，供管理后台对应设备。
+3. **连接**：点击「连接」→ 启动连接保活前台服务 → 换一次性 ticket → 连 `/ws/device`。
+4. **心跳上报**：连接成功后每 30 秒发送 `heartbeat`（含电量、RTT、状态），管理后台据此展示设备在线与状态。
 
-1. 连接流程
-   - 使用设备 Token 获取一次性 WebSocket ticket
-   - 连接成功后等待管理员 `watch-request`
-   - 支持用户手动断开连接和服务端断开连接
+## 连接保活机制
 
-2. 屏幕共享同意
-   - 设备端在收到 `watch-request` 后弹出确认对话框
-   - 用户确认后才调用 `MediaProjectionManager.createScreenCaptureIntent()`
-   - 取消/拒绝时发送 `watch-denied`
+设备连接运行在**前台服务**（`ConnectionForegroundService`）中，保证后台/锁屏不掉线：
 
-3. WebRTC 处理
-   - 创建 `PeerConnection`
-   - 采集屏幕并创建 VideoTrack
-   - 发送 offer，并处理 answer 与 candidate
-   - 正确处理 `watch-stop` 和连接失效时的清理
+1. **前台服务 + 常驻通知**：系统不会轻易杀前台服务，连接得以长期存活。
+2. **`START_STICKY`**：服务被系统杀死后尝试重启，重启后自动重连。
+3. **断线自动重连（指数退避）**：非用户主动断开时自动重连，退避 1s→2s→4s…封顶 30s；连接成功后重置。
+4. **电池优化白名单引导**：首次连接时引导用户把 App 加入省电白名单，避免 Doze 模式锁屏后冻结网络。
+5. **心跳健壮化**：心跳发送异常不中断定时循环。
 
-4. 后台保活
-   - 使用 `ProjectionForegroundService` 作为前台服务，保证共享期间不会被系统过早终止
+> 说明：不采用双进程守护、高频唤醒等灰色保活手段；在 minSdk 26 / targetSdk 34 下，前台服务 + 白名单 + 自动重连是规范且有效的方式。
 
 ## 运行要求
 
 - Android Studio Jellyfish / 2024 及以上
 - Android SDK 35
 - JDK 17
-- `org.webrtc:google-webrtc` 依赖
+- 依赖：`com.squareup.okhttp3:okhttp`、`androidx.core:core`、`com.google.android.material:material`
 
 ## 使用方式
 
-1. 启动后端服务：`eclipseorc/wanxiang-server`
-2. 在管理后台创建设备并复制 `deviceId` / `deviceToken`
-3. 在 Android 客户端中填入：
-   - HTTP API 地址，例如 `http://10.0.2.2:8080`
-   - WebSocket 地址，例如 `ws://10.0.2.2:8081/ws/device`
-   - 设备 ID
-   - 设备 Token
-4. 点击“连接设备服务”
-5. 后台管理员发起“查看屏幕”后，设备端弹出授权提示
-6. 点“授权并开始”，系统弹出屏幕捕获授权
-7. 授权后，WebRTC 开始协商并发送屏幕流
+1. 启动后端四个服务：`eclipseorc/wanxiang-server`（web-server:9001、admin-server:9002、websocket-server:9003、scrcpy-server:9004）。
+2. 在「配置」页填入：
+   - Web 服务器地址/端口，例如 `10.0.2.2` / `9001`（模拟器访问宿主机用 `10.0.2.2`，真机用服务器局域网 IP）
+   - WebSocket 服务器地址/端口，例如 `10.0.2.2` / `9003`
+3. 点击「连接」，状态显示「设备已连接」即接入成功。连接运行在前台服务中，可退到后台或锁屏。
+4. 打开管理后台 `http://<服务器>:9002`，设备清单中即可看到该设备在线，并显示电量、RTT 等信息。
 
 ## 注意事项
 
-- 正式环境必须用 HTTPS/WSS，不建议公开暴露 WebSocket
-- 生产环境建议接入 TURN，保证 NAT/防火墙环境下也能完成 ICE 连接
-- 此示例是“最小客户端增强版”，适合联调和功能验证，不替代完整的设备管理/安全策略实现
-
+- 正式环境必须用 HTTPS/WSS，不建议公开暴露 WebSocket。
+- 设备不登录、无独立令牌：deviceId 由本机生成并作为唯一凭证，服务端首次收到即自动登记设备。
+- 远程屏幕控制由管理后台通过 scrcpy（ADB 无线调试）发起，本 App 不参与屏幕采集。
+- 若设备仍频繁掉线，请确认已把 App 加入电池优化白名单，且未开启激进的省电模式。

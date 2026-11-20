@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 无障碍服务配置（AutoAdbAccessibilityService）：全自动进开发者选项 →
+     点「无线调试」→「使用配对码配对设备」→ 读取 6 位配对码与 IP:端口，
+     再交给 LocalAdbManager 在设备本地完成配对并固化 5555 端口。
+     canRetrieveWindowContent 必须为 true 才能读取配对码与地址文本。
+     packageNames 需包含 com.android.settings（开发者选项宿主）。 -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/auto_adb_accessibility_desc"
+    android:notificationTimeout="100"
+    android:packageNames="com.android.settings" />
