@@ -1,8 +1,6 @@
 package com.wanxiang.client;
 
 import android.accessibilityservice.AccessibilityService;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -19,7 +17,7 @@ import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 无障碍服务（MDM 本地自配对）：利用 Device Owner / MDM 权限静默激活后，自动完成
+ * 无障碍服务（本地自配对）：利用无障碍服务自动完成
  * 「打开无线调试 → 点开关 → 点确认框 → 读配对码 → 本地配对并固化 5555」，
  * 最终让服务端用固定 {@code IP:5555} 稳定连接。
  *
@@ -39,13 +37,12 @@ import java.nio.charset.StandardCharsets;
  * <p>前置条件（每台设备首次一次性、手机上手动完成）：</p>
  * <ol>
  *   <li>开启开发者选项；</li>
- *   <li>本 App 通过二维码纳管为 Device Owner；</li>
  *   <li>系统设置 → 无障碍 → 开启「万象设备端」；</li>
- *   <li>锁屏方式设为「无」。</li>
+ *   <li>锁屏方式设为「无」（自动配对期间需保持屏幕常亮，锁屏会导致拿不到窗口节点）。</li>
  * </ol>
  */
 public class AutoAdbAccessibilityService extends AccessibilityService {
-    private static final String TAG = "MDM_A11yAdb";
+    private static final String TAG = "A11yAdb";
 
     /** 任务是否正在进行（供外部查询/去重）。 */
     public static volatile boolean isTaskRunning = false;
@@ -159,17 +156,13 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         // 若手机熄屏（Dozing），无障碍服务拿不到有效窗口，滚动点击全部失效，
         // 表现为「卡死在开发者选项页」。任务启动即唤醒 + 持 WakeLock，结束再释放。
         acquireScreenWakeLock(ctx);
-        // 关键修复：任务期间禁用锁屏。设备进入锁屏/Doze 后 getRootInActiveWindow()
-        // 拿到的是锁屏窗口而非开发者选项页，引擎静默卡死。Device Owner 可禁用 keyguard。
-        disableKeyguard(ctx);
         DebugConsole.info("A11Y", "自动配对任务启动，读取本地缓存的机型脚本");
-        // 读取本地缓存的机型脚本（由 ConnectionForegroundService 收到 mdm-script 时写入）。
+        // 读取本地缓存的机型脚本（由 ConnectionForegroundService 收到 device-script 时写入）。
         DeviceScript script = DeviceScriptStore.load(ctx);
         if (script == null) {
             DebugConsole.error("A11Y", "本地无机型脚本！原因：服务端尚未下发、或设备未重连拉取。请先确认后台已为该型号添加脚本，再重连（或点「立即拉取脚本」）。");
             isTaskRunning = false;
             releaseScreenWakeLock();
-            reenableKeyguard(ctx);
             return;
         }
         DebugConsole.success("A11Y", "已加载机型脚本：" + script.name + "（id=" + script.scriptId + "）v" + script.version + "，共 " + script.steps.size() + " 步");
@@ -179,7 +172,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
             DebugConsole.error("A11Y", "无障碍服务未连接！请在 系统设置 → 无障碍 中开启「万象设备端」后重试。");
             isTaskRunning = false;
             releaseScreenWakeLock();
-            reenableKeyguard(ctx);
             return;
         }
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -198,7 +190,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
             DebugConsole.error("A11Y", "打开开发者选项失败: " + e.getMessage());
             isTaskRunning = false;
             releaseScreenWakeLock();
-            reenableKeyguard(ctx);
         }
     }
 
@@ -248,42 +239,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         }
     }
 
-    /**
-     * 任务期间禁用锁屏（Device Owner 能力）。这是自动配对的<b>关键前置</b>：
-     * 若设备进入锁屏/Doze，getRootInActiveWindow() 拿到的是锁屏窗口而非开发者选项页，
-     * 引擎拿不到有效节点、静默卡死直到超时。作为 Device Owner 可禁用 keyguard，
-     * 任务结束后恢复。
-     */
-    private static void disableKeyguard(Context ctx) {
-        try {
-            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
-            if (dpm == null || !dpm.isDeviceOwnerApp(ctx.getPackageName())) {
-                Log.w(TAG, "非 Device Owner，跳过禁用锁屏");
-                return;
-            }
-            ComponentName admin = MyDeviceAdminReceiver.getComponentName(ctx);
-            dpm.setKeyguardDisabled(admin, true);
-            Log.i(TAG, "keyguard disabled during task");
-        } catch (Throwable t) {
-            Log.w(TAG, "disable keyguard failed", t);
-        }
-    }
-
-    /** 恢复锁屏（任务结束时调用）。 */
-    private static void reenableKeyguard(Context ctx) {
-        try {
-            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
-            if (dpm == null || !dpm.isDeviceOwnerApp(ctx.getPackageName())) {
-                return;
-            }
-            ComponentName admin = MyDeviceAdminReceiver.getComponentName(ctx);
-            dpm.setKeyguardDisabled(admin, false);
-            Log.i(TAG, "keyguard re-enabled");
-        } catch (Throwable t) {
-            Log.w(TAG, "re-enable keyguard failed", t);
-        }
-    }
-
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -302,7 +257,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         isTaskRunning = false;
         engine = null;
         releaseScreenWakeLock();
-        reenableKeyguard(this);
         return super.onUnbind(intent);
     }
 
@@ -377,7 +331,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         taskStartMs = 0L;
         handler.removeCallbacks(selfAdvanceTask);
         releaseScreenWakeLock();
-        reenableKeyguard(this);
     }
 
     private void abort(String reason) {
@@ -386,7 +339,6 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         taskStartMs = 0L;
         handler.removeCallbacks(selfAdvanceTask);
         releaseScreenWakeLock();
-        reenableKeyguard(this);
         Log.w(TAG, "task aborted: " + reason);
         DebugConsole.warn("A11Y", "自动配对任务中止：[" + reason + "]");
     }
@@ -396,12 +348,11 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         engine = null;
         isTaskRunning = false;
         releaseScreenWakeLock();
-        reenableKeyguard(this);
     }
 
     /**
      * 机型脚本本地缓存的读写（文件 {@code device_script.json}）。
-     * 由 {@link ConnectionForegroundService} 收到 {@code mdm-script} 时写入；
+     * 由 {@link ConnectionForegroundService} 收到 {@code device-script} 时写入；
      * 触发自动配对时读取。做版本比较避免旧消息覆盖新脚本。
      */
     public static final class DeviceScriptStore {

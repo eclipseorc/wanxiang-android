@@ -20,7 +20,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
@@ -54,7 +53,6 @@ public class SettingsFragment extends Fragment {
     private MaterialButton disconnectButton;
     private MaterialButton testAdbRecoverButton;
     private MaterialButton pullScriptButton;
-    private MaterialButton clearDeviceOwnerButton;
 
     private String deviceId;
 
@@ -126,7 +124,6 @@ public class SettingsFragment extends Fragment {
         disconnectButton = root.findViewById(R.id.disconnectButton);
         testAdbRecoverButton = root.findViewById(R.id.testAdbRecoverButton);
         pullScriptButton = root.findViewById(R.id.pullScriptButton);
-        clearDeviceOwnerButton = root.findViewById(R.id.clearDeviceOwnerButton);
     }
 
     private void applySavedConfig() {
@@ -141,55 +138,16 @@ public class SettingsFragment extends Fragment {
         disconnectButton.setOnClickListener(v -> stopConnection());
         testAdbRecoverButton.setOnClickListener(v -> testAdbRecover());
         pullScriptButton.setOnClickListener(v -> pullScript());
-        clearDeviceOwnerButton.setOnClickListener(v -> confirmClearDeviceOwner());
     }
 
     // pullScript 发送应用内广播，让前台服务立即向服务端拉取一次机型脚本。
     // 这样管理员在后台加了脚本后，无需等设备重连即可立即拉取并缓存。
     private void pullScript() {
-        DebugConsole.info("MDM", "用户点击「立即拉取机型脚本」");
+        DebugConsole.info("SCRIPT", "用户点击「立即拉取机型脚本」");
         Intent intent = new Intent(ConnectionForegroundService.ACTION_PULL_SCRIPT);
         intent.setPackage(requireContext().getPackageName());
         requireContext().sendBroadcast(intent);
         Snackbar.make(requireView(), "已发送拉取请求，请查看主页 Console 日志确认结果", Snackbar.LENGTH_LONG).show();
-    }
-
-    // confirmClearDeviceOwner 二次确认后清除 Device Owner 纳管，并引导卸载。
-    private void confirmClearDeviceOwner() {
-        new AlertDialog.Builder(requireContext())
-                .setTitle("解除设备纳管")
-                .setMessage("解除后本应用将退出设备管控（Device Owner），可被正常卸载。\n\n"
-                        + "如需恢复管控，需要重新扫码纳管。是否继续？")
-                .setPositiveButton("解除纳管", (dialog, which) -> doClearDeviceOwner())
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    // doClearDeviceOwner 执行清除，成功后引导系统卸载界面。
-    private void doClearDeviceOwner() {
-        DebugConsole.warn("MDM", "用户触发解除 Device Owner 纳管");
-        boolean ok = MdmPolicyManager.clearDeviceOwner(requireContext());
-        if (ok) {
-            DebugConsole.success("MDM", "已解除 Device Owner，可正常卸载");
-            Snackbar.make(requireView(), "已解除纳管", Snackbar.LENGTH_LONG).show();
-            // 解除成功后，引导用户进入系统卸载确认界面。
-            promptUninstall();
-        } else {
-            DebugConsole.error("MDM", "解除 Device Owner 失败（可能当前并非纳管状态）");
-            Snackbar.make(requireView(), "解除失败，请检查是否已纳管或查看日志", Snackbar.LENGTH_LONG).show();
-        }
-    }
-
-    // promptUninstall 弹出系统卸载确认界面，用户确认后即卸载本应用。
-    private void promptUninstall() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_DELETE);
-            intent.setData(Uri.parse("package:" + requireContext().getPackageName()));
-            startActivity(intent);
-        } catch (Exception e) {
-            DebugConsole.error("MDM", "打开卸载界面失败: " + e.getMessage());
-            Snackbar.make(requireView(), "请到 设置 → 应用 → 万象设备端 手动卸载", Snackbar.LENGTH_LONG).show();
-        }
     }
 
     // testAdbRecover 手动触发一次本地 ADB 5555 恢复：优先走 WRITE_SECURE_SETTINGS 后台静默秒开通道，
@@ -202,7 +160,7 @@ public class SettingsFragment extends Fragment {
             LocalAdbManager.trySilentSwitchTo5555(appCtx, new LocalAdbManager.Callback() {
                 @Override
                 public void onSuccess() {
-                    MdmDaemonService.notifyAdbReady(appCtx);
+                    AdbReadyNotifier.notifyAdbReady(appCtx);
                     DebugConsole.success("ADB", "后台静默开启并固化 5555 端口成功（无需打开设置界面）");
                     if (isAdded() && adbRecoverStatusView != null) {
                         adbRecoverStatusView.post(() -> {
@@ -273,9 +231,9 @@ public class SettingsFragment extends Fragment {
         return false;
     }
 
-    // refreshAdbRecoverStatus 刷新 MDM 自配对状态提示。
+    // refreshAdbRecoverStatus 刷新自配对状态提示。
     private void refreshAdbRecoverStatus() {
-        adbRecoverStatusView.setText("已启用 MDM 本地自配对：开机后自动进开发者选项点「无线调试」开关、"
+        adbRecoverStatusView.setText("已启用本地自配对：开机后自动进开发者选项点「无线调试」开关、"
                 + "读配对码并本地配对、固化 5555 端口。点击下方按钮可手动触发一次。");
     }
 

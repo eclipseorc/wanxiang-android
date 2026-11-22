@@ -6,7 +6,7 @@ import android.content.Intent;
 import android.util.Log;
 
 /**
- * 开机广播接收器：设备重启后触发 MDM 本地自配对流程，自动重新开启「无线调试」、
+ * 开机广播接收器：设备重启后触发本地自配对流程，自动重新开启「无线调试」、
  * 自动配对并固化 5555 端口，让服务端无需人工插 USB 即可恢复远程控制。
  *
  * <p>背景：Android 11+ 的无线调试（Wireless Debugging）出于安全考虑，会在设备
@@ -41,7 +41,7 @@ public class BootReceiver extends BroadcastReceiver {
                     public void onSuccess() {
                         try {
                             DebugConsole.success("BOOT", "开机快速恢复 5555 端口成功");
-                            MdmDaemonService.notifyAdbReady(appCtx);
+                            AdbReadyNotifier.notifyAdbReady(appCtx);
                         } finally {
                             pending.finish();
                         }
@@ -64,38 +64,6 @@ public class BootReceiver extends BroadcastReceiver {
         } catch (Exception e) {
             Log.e(TAG, "start auto-pair task failed", e);
             DebugConsole.error("BOOT", "开机触发自动配对失败: " + e.getMessage());
-        }
-
-        // 开机自启：读取服务端下发的自启列表，逐个拉起目标应用。
-        launchAutoStartApps(context);
-    }
-
-    // launchAutoStartApps 读取「开机自启」策略里保存的包名列表，并逐一起动这些应用。
-    // 列表由 MdmPolicyManager.applyAutoStart 在收到策略时持久化到 mdm_config。
-    private void launchAutoStartApps(Context context) {
-        try {
-            String list = context.getSharedPreferences("mdm_config", Context.MODE_PRIVATE)
-                    .getString("auto_start_packages", "");
-            if (list == null || list.isEmpty()) {
-                return;
-            }
-            for (String pkg : list.split(",")) {
-                if (pkg == null || pkg.trim().isEmpty()) {
-                    continue;
-                }
-                try {
-                    Intent launch = context.getPackageManager().getLaunchIntentForPackage(pkg.trim());
-                    if (launch != null) {
-                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(launch);
-                        Log.i(TAG, "auto-start app launched: " + pkg);
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "auto-start app failed: " + pkg, e);
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "launch auto-start apps failed", e);
         }
     }
 }

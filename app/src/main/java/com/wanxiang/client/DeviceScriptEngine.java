@@ -52,7 +52,7 @@ import java.util.regex.Pattern;
  * 配对码正则与滚动上限。加冷门新机型时，服务端下发脚本即可扩展状态机词表，无需改 APK。</p>
  */
 public final class DeviceScriptEngine {
-    private static final String TAG = "MDM_ScriptEngine";
+    private static final String TAG = "DeviceScriptEngine";
 
     /** 状态机枚举（按判定优先级由高到低：S6 > S4 > S5 > S3 > S2 > S1）。 */
     public enum State {
@@ -932,7 +932,7 @@ public final class DeviceScriptEngine {
             public void onSuccess() {
                 DebugConsole.success("STATE", "本地配对成功，已固化 5555 端口");
                 service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
-                MdmDaemonService.notifyAdbReady(service);
+                AdbReadyNotifier.notifyAdbReady(service);
                 finishSuccess();
             }
 

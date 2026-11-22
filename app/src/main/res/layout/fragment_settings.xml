@@ -348,40 +348,5 @@
             app:strokeColor="@color/danger"
             android:textColor="@color/danger" />
 
-        <!-- 分隔 -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/line"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="20dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="设备纳管"
-            android:textColor="@color/ink"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="解除后本应用退出设备管控，可被正常卸载；如需恢复管控需重新扫码纳管。"
-            android:textColor="@color/muted"
-            android:textSize="12sp"
-            android:layout_marginBottom="14dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/clearDeviceOwnerButton"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:text="解除设备纳管"
-            android:textSize="15sp"
-            android:textColor="@color/danger"
-            app:cornerRadius="14dp"
-            app:backgroundTint="@color/danger_soft" />
-
     </LinearLayout>
 </ScrollView>

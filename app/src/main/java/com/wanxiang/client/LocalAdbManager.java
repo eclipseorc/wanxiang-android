@@ -68,7 +68,7 @@ import java.util.concurrent.Executors;
  * 保证同一台设备的「授权」关系稳定。</p>
  */
 public class LocalAdbManager {
-    private static final String TAG = "MDM_LocalAdb";
+    private static final String TAG = "LocalAdb";
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public interface Callback {
@@ -312,7 +312,7 @@ public class LocalAdbManager {
                 PublicKey publicKey = kp.getPublic();
 
                 // 用 sun-security-android 提供的 android.sun.security.x509 包构造证书。
-                String subject = "CN=Wanxiang MDM Client";
+                String subject = "CN=Wanxiang Client";
                 String algorithmName = "SHA512withRSA";
                 Date notBefore = new Date();
                 Date notAfter = new Date(System.currentTimeMillis() + 10L * 365 * 24 * 3600 * 1000); // 约 10 年
@@ -354,7 +354,7 @@ public class LocalAdbManager {
 
         @NonNull
         @Override
-        protected String getDeviceName() { return "Wanxiang-MDM-Client"; }
+        protected String getDeviceName() { return "Wanxiang-Client"; }
 
         private static PrivateKey readPrivateKeyFromFile(Context context) throws Exception {
             File keyFile = new File(context.getFilesDir(), "adb_priv.key");

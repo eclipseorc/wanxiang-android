@@ -28,7 +28,7 @@
             android:name=".ConnectionForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-        <!-- 无障碍服务（MDM 本地自配对）：自动点「无线调试」开关 + 读配对码 + 本地配对并固化 5555 -->
+        <!-- 无障碍服务（本地自配对）：自动点「无线调试」开关 + 读配对码 + 本地配对并固化 5555 -->
         <service
             android:name=".AutoAdbAccessibilityService"
             android:exported="true"
@@ -41,21 +41,6 @@
                 android:resource="@xml/accessibility_config" />
         </service>
 
-        <!-- MDM Device Admin 接收器 -->
-        <receiver
-            android:name=".MyDeviceAdminReceiver"
-            android:description="@string/app_name"
-            android:exported="true"
-            android:label="MDM Admin"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin_policies" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
-            </intent-filter>
-        </receiver>
         <!-- 开机广播：自动重开无线调试。Android 8.0+ 静态注册受限，但
              RECEIVE_BOOT_COMPLETED 属豁免白名单，可静态接收。 -->
         <receiver

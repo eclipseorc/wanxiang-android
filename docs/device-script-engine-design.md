@@ -37,10 +37,10 @@
 │    ├─ steps_json:      [...]                                 │
 │    └─ version / updated_at                                   │
 │         │                                                   │
-│         │  经 WebSocket 下发（复用 mdm-policy 同款链路）      │
+│         │  经 WebSocket 下发（复用 device-script 同款链路）      │
 │         ▼                                                   │
 └─────────────────────────────────────────────────────────────┘
-                          │  mdm-script 消息
+                          │  device-script 消息
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  App（Android）                                              │
@@ -141,14 +141,14 @@ CREATE TABLE IF NOT EXISTS device_model_scripts(
 
 ### 5.3 WebSocket 下发（`internal/transport/websocket/server.go`）
 
-对称复用 `mdm-policy` 机制：
+对称复用 `device-script` 机制：
 
-- `handleDevice` 增加 case `"mdm-pull-script"` → `sendDeviceScript(c)`
+- `handleDevice` 增加 case `"pull-device-script"` → `sendDeviceScript(c)`
 - 新方法 `sendDeviceScript(c)`：用设备上报的 `model`（已落库 `devices.model`）匹配脚本，下发给设备
-- 消息格式：`{"type":"mdm-script","script":{...},"version":N}`
-- 管理端推送：case `"mdm-script-push"` → `pushDeviceScripts()`（可选，后续做）
+- 消息格式：`{"type":"device-script","script":{...},"version":N}`
+- 管理端推送：case `"device-script-push"` → `pushDeviceScripts()`（可选，后续做）
 
-### 5.4 管理接口（`internal/transport/adminapi/mdm.go` 或新文件 `device_script.go`）
+### 5.4 管理接口（`internal/transport/adminapi/device_script.go`）
 
 - `GET  /api/admin/device-scripts` — 列出全部脚本
 - `POST /api/admin/device-scripts` — 新增/更新（含 match_patterns + steps_json）
@@ -169,9 +169,9 @@ CREATE TABLE IF NOT EXISTS device_model_scripts(
      ├─POST /api/admin/device-scripts►│                              │
      │                              │ ②落库 device_model_scripts 表  │
      │                              │                              │
-     │                              │◄─③连上后发 mdm-pull-script─────┤
+     │                              │◄─③连上后发 pull-device-script─────┤
      │                              │ ④按设备 model 匹配脚本          │
-     │                              ├─⑤下发 mdm-script {script,version}►│
+     │                              ├─⑤下发 device-script {script,version}►│
      │                              │                              │ ⑥写本地缓存
      │                              │                              │ ⑦触发时读缓存执行
 ```
@@ -181,20 +181,20 @@ CREATE TABLE IF NOT EXISTS device_model_scripts(
 **时机 A：设备主动「拉」（主路径）**
 - 触发点：`ConnectionForegroundService` 的 `onOpen`（连接建立成功），与
   `pullMdmPolicy()` 对称新增 `pullDeviceScript()`。
-- 设备端上行：`{ "type": "mdm-pull-script" }`
+- 设备端上行：`{ "type": "pull-device-script" }`
 - 服务端 `handleDevice` → `sendDeviceScript(c)`：
   1. `DeviceByID(c.id)` 取 `model`（已由设备首次连接时 `UpsertDevice` 写入）
   2. 拿 model 在 `match_patterns` 里做前缀/子串匹配
   3. 命中 → 下发完整脚本；未命中 → 下发空脚本 + 明确标志（设备记日志，本次不配对）
 
 **时机 B：服务端主动「推」（增量更新，可选，第一批先不做）**
-- 触发点：管理员改了脚本后，经 `/ws/admin` 发 `{ "type": "mdm-script-push" }`
+- 触发点：管理员改了脚本后，经 `/ws/admin` 发 `{ "type": "device-script-push" }`
 - 服务端 `pushDeviceScripts()`：推给所有在线的、机型匹配的设备（对称 `pushMdmPolicies`）
 - 价值：改完不用等设备重启/重连；但「重连即拉」已覆盖主场景，故第一批仅做拉。
 
 ### 设备端收到后的处理
 
-`onMessage` 新增 `"mdm-script"` 分支 → `handleDeviceScript(msg)`：
+`onMessage` 新增 `"device-script"` 分支 → `handleDeviceScript(msg)`：
 1. **版本比较**：本地 `version` ≥ 下发 `version` 则忽略（防旧消息覆盖新脚本）
 2. **写缓存**：`getFilesDir()/device_script.json`
 3. **记日志**：`DebugConsole.info("已更新机型脚本 vN")`
@@ -237,13 +237,13 @@ CREATE TABLE IF NOT EXISTS device_model_scripts(
 ### 6.4 改造 `ConnectionForegroundService.java`
 
 - `onOpen` 里除 `pullMdmPolicy()` 外增加 `pullDeviceScript()`
-- `onMessage` 处理 `"mdm-script"` → 写本地缓存文件 + 通知引擎
+- `onMessage` 处理 `"device-script"` → 写本地缓存文件 + 通知引擎
 - 缓存路径：`context.getFilesDir()/device_script.json`
 
 ## 7. 实施顺序（分批）
 
 1. **第一批（服务端底座）**：建表 + Store CRUD + adminapi CRUD 接口
-2. **第二批（下发链路）**：WebSocket `mdm-pull-script` / `mdm-script` 下发
+2. **第二批（下发链路）**：WebSocket `pull-device-script` / `device-script` 下发
 3. **第三批（App 引擎）**：`DeviceScript` + `DeviceScriptEngine` + 改造 `AutoAdbAccessibilityService`
 4. **第四批（App 拉取）**：`ConnectionForegroundService` 拉取 + 缓存 + 首份 Moto E14 脚本
 5. **第五批（验证）**：Moto E14 真机回归 + 加第二个机型脚本验证「不改 APK」目标

@@ -18,7 +18,7 @@ import androidx.fragment.app.Fragment;
  * 主页：顶部广告位占位 + 底部实时 Console 日志区。
  *
  * <p>Console 通过 {@link DebugConsole} 全局日志总线订阅，实时展示设备端各模块
- * （无障碍服务、本地 ADB 配对、连接服务、纳管）当前执行到哪一步，方便不抓
+ * （无障碍服务、本地 ADB 配对、连接服务）当前执行到哪一步，方便不抓
  * logcat 也能排查问题。日志按级别着色，自动滚动到底部。</p>
  */
 public class HomeFragment extends Fragment {

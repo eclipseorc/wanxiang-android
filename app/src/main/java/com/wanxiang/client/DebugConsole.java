@@ -11,8 +11,8 @@ import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 全局调试日志总线（Console）：把各模块（无障碍服务、本地 ADB 配对、连接服务、
- * Device Owner 纳管）的关键执行步骤集中起来，供 App 主页的 Console 视图实时展示，
+ * 全局调试日志总线（Console）：把各模块（无障碍服务、本地 ADB 配对、连接服务）
+ * 的关键执行步骤集中起来，供 App 主页的 Console 视图实时展示，
  * 方便不抓 logcat 也能排查「执行到哪一步了」。
  *
  * <p>设计：</p>

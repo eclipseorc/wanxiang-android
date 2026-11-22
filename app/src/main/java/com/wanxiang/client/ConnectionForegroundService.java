@@ -20,14 +20,8 @@ import android.provider.Settings;
 
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URLEncoder;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -86,12 +80,12 @@ public class ConnectionForegroundService extends Service {
     private Handler heartbeatHandler;
     private long reconnectDelayMs = RECONNECT_BASE_MS;
 
-    // 监听 MDM 本地自配对完成广播，收到后用自己的 WebSocket 上报 adb-ready。
+    // 监听本地自配对完成广播，收到后用自己的 WebSocket 上报 adb-ready。
     private final BroadcastReceiver adbReadyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            String lanIp = intent.getStringExtra(MdmDaemonService.EXTRA_LAN_IP);
-            int port = intent.getIntExtra(MdmDaemonService.EXTRA_ADB_PORT, 5555);
+            String lanIp = intent.getStringExtra(AdbReadyNotifier.EXTRA_LAN_IP);
+            int port = intent.getIntExtra(AdbReadyNotifier.EXTRA_ADB_PORT, 5555);
             sendAdbReady(lanIp, port);
         }
     };
@@ -137,7 +131,7 @@ public class ConnectionForegroundService extends Service {
         heartbeatThread.start();
         heartbeatHandler = new Handler(heartbeatThread.getLooper());
         startForegroundWithNotification();
-        IntentFilter filter = new IntentFilter(MdmDaemonService.ACTION_ADB_READY);
+        IntentFilter filter = new IntentFilter(AdbReadyNotifier.ACTION_ADB_READY);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(adbReadyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
@@ -293,15 +287,13 @@ public class ConnectionForegroundService extends Service {
             msg.put("rttMs", 0);
             msg.put("status", "ready");
             msg.put("ip", getLocalIpAddress());
-            // 上报 MDM 纳管状态，服务端据此分流「MDM 自动化路径」与「adb 传统路径」。
-            msg.put("mdmEnabled", MdmPolicyManager.isDeviceOwner(this));
             ws.send(msg.toString());
         } catch (Exception ignored) {
             // 发送失败不抛出，交给重连逻辑处理。
         }
     }
 
-    // sendAdbReady 在 MDM 本地自配对完成（固化 5555）后，通过 WebSocket 上报
+    // sendAdbReady 在本地自配对完成（固化 5555）后，通过 WebSocket 上报
     // adb-ready 事件，服务端收到后执行 adb connect IP:5555。这是「ADB 就绪」的
     // 一次性事件通知，与周期心跳无关；WebSocket 未连接时静默丢弃（服务端处理幂等，
     // 下次心跳/重连后可再触发）。
@@ -369,18 +361,6 @@ public class ConnectionForegroundService extends Service {
         showAdbAlertNotification(nm);
     }
 
-    // pullMdmPolicy 连接建立后请求服务端下发当前全局 MDM 策略。
-    private void pullMdmPolicy() {
-        WebSocket ws = socket;
-        if (ws == null) {
-            return;
-        }
-        try {
-            ws.send("{\"type\":\"mdm-pull-policy\"}");
-        } catch (Exception ignored) {
-        }
-    }
-
     // pullDeviceScript 连接建立后请求服务端下发本机机型脚本（按 model 匹配）。
     private void pullDeviceScript() {
         WebSocket ws = socket;
@@ -388,8 +368,8 @@ public class ConnectionForegroundService extends Service {
             return;
         }
         try {
-            ws.send("{\"type\":\"mdm-pull-script\"}");
-            DebugConsole.info("SCRIPT", "已发送脚本拉取请求（mdm-pull-script），等待服务端下发…");
+            ws.send("{\"type\":\"pull-device-script\"}");
+            DebugConsole.info("SCRIPT", "已发送脚本拉取请求（pull-device-script），等待服务端下发…");
         } catch (Exception e) {
             DebugConsole.error("SCRIPT", "发送脚本拉取请求失败: " + e.getMessage());
         }
@@ -408,7 +388,7 @@ public class ConnectionForegroundService extends Service {
         }
         JSONObject script = msg.optJSONObject("script");
         if (script == null) {
-            DebugConsole.error("SCRIPT", "收到 mdm-script 但缺少 script 字段");
+            DebugConsole.error("SCRIPT", "收到 device-script 但缺少 script 字段");
             return;
         }
         int version = script.optInt("version", 0);
@@ -420,117 +400,6 @@ public class ConnectionForegroundService extends Service {
         if (saved) {
             DebugConsole.success("SCRIPT", "脚本已写入本地缓存：" + name + " v" + version + "（重连或触发配对时生效）");
         }
-    }
-
-    // handleMdmPolicy 处理服务端下发的策略，转交 MdmPolicyManager 落地。
-    private void handleMdmPolicy(org.json.JSONObject policies) {
-        if (policies == null) {
-            return;
-        }
-        Map<String, String> map = new HashMap<>();
-        Iterator<String> keys = policies.keys();
-        while (keys.hasNext()) {
-            String key = keys.next();
-            map.put(key, policies.optString(key));
-        }
-        MdmPolicyManager.applyPolicies(this, map);
-    }
-
-    // handleMdmDeviceCommand 处理服务端下发的单台设备安装/卸载指令：
-    // 安装 → 下载 APK 到本地 → PackageInstaller 静默安装；卸载 → 静默卸载。
-    // 完成后通过 WebSocket 回传结果给服务端。
-    private void handleMdmDeviceCommand(JSONObject msg) {
-        String action = msg.optString("action", "");
-        String packageName = msg.optString("packageName", "");
-        if (!"install".equals(action) && !"uninstall".equals(action)) {
-            return;
-        }
-        // 卸载无需下载，直接执行。
-        if ("uninstall".equals(action)) {
-            int code = MdmPolicyManager.silentUninstall(this, packageName);
-            sendMdmCommandResult(action, packageName, code == 0, code == 0 ? "" : "uninstall failed");
-            return;
-        }
-
-        // 安装：下载 APK（downloadUrl 是相对路径，用 admin host 拼接）。
-        String downloadUrl = msg.optString("downloadUrl", "");
-        if (downloadUrl.isEmpty()) {
-            sendMdmCommandResult(action, packageName, false, "missing downloadUrl");
-            return;
-        }
-        downloadApkAndInstall(downloadUrl, packageName);
-    }
-
-    // downloadApkAndInstall 从服务端下载 APK 到本地缓存，然后静默安装。
-    private void downloadApkAndInstall(String downloadPath, String packageName) {
-        String adminBase = buildAdminBase();
-        if (adminBase == null) {
-            sendMdmCommandResult("install", packageName, false, "admin host not configured");
-            return;
-        }
-        String url = adminBase + downloadPath;
-        File apkFile = new File(getCacheDir(), packageName + ".apk");
-        try {
-            okhttp3.Request request = new okhttp3.Request.Builder().url(url).build();
-            try (Response response = httpClient.newCall(request).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    sendMdmCommandResult("install", packageName, false, "download failed: " + response.code());
-                    return;
-                }
-                try (InputStream in = response.body().byteStream();
-                     FileOutputStream out = new FileOutputStream(apkFile)) {
-                    byte[] buf = new byte[64 * 1024];
-                    int n;
-                    while ((n = in.read(buf)) > 0) {
-                        out.write(buf, 0, n);
-                    }
-                }
-            }
-            int code = MdmPolicyManager.silentInstall(this, apkFile, packageName);
-            boolean ok = code == 0;
-            sendMdmCommandResult("install", packageName, ok, ok ? "" : "install failed");
-        } catch (Exception e) {
-            sendMdmCommandResult("install", packageName, false, e.getMessage());
-        } finally {
-            // 清理临时 APK，避免占用缓存。
-            //noinspection ResultOfMethodCallIgnored
-            apkFile.delete();
-        }
-    }
-
-    // sendMdmCommandResult 通过 WebSocket 回传 MDM 指令执行结果。
-    private void sendMdmCommandResult(String action, String packageName, boolean ok, String error) {
-        WebSocket ws = socket;
-        if (ws == null) {
-            return;
-        }
-        try {
-            JSONObject msg = new JSONObject();
-            msg.put("type", "mdm-command-result");
-            msg.put("action", action);
-            msg.put("packageName", packageName);
-            msg.put("ok", ok);
-            if (error != null && !error.isEmpty()) {
-                msg.put("error", error);
-            }
-            ws.send(msg.toString());
-        } catch (Exception ignored) {
-        }
-    }
-
-    // buildAdminBase 返回管理后台（9002）的 http 前缀，用于下载 APK。
-    private String buildAdminBase() {
-        SharedPreferences prefs = getSharedPreferences("wanxiang_device", MODE_PRIVATE);
-        String host = prefs.getString("admin_host", null);
-        String port = prefs.getString("admin_port", null);
-        // 未单独配置 admin host 时，回退到 web host（同机部署时通常同 IP）。
-        if (host == null || host.isEmpty()) {
-            host = prefs.getString("web_host", "10.0.2.2");
-        }
-        if (port == null || port.isEmpty()) {
-            port = "9002";
-        }
-        return "http://" + host + ":" + port;
     }
 
     // showAdbAlertNotification 弹出「远程控制已断开」提醒，点击后跳转系统无线调试页。
@@ -673,9 +542,7 @@ public class ConnectionForegroundService extends Service {
             notifyState("online");
             startHeartbeat();
             DebugConsole.success("WS", "WebSocket 已连接");
-            // 连接建立后主动拉取一次全局 MDM 策略，确保策略在设备端落地。
-            pullMdmPolicy();
-            // 同时拉取本机机型脚本（按 model 匹配），供自动配对使用。
+            // 连接建立后拉取本机机型脚本（按 model 匹配），供自动配对使用。
             pullDeviceScript();
         }
 
@@ -697,18 +564,8 @@ public class ConnectionForegroundService extends Service {
                     handleAdbStatus(msg.optJSONObject("data"));
                     return;
                 }
-                // mdm-policy：服务端下发全局 MDM 策略，落地到 DevicePolicyManager。
-                if ("mdm-policy".equals(type)) {
-                    handleMdmPolicy(msg.optJSONObject("policies"));
-                    return;
-                }
-                // mdm-device-command：服务端下发单台设备的安装/卸载指令。
-                if ("mdm-device-command".equals(type)) {
-                    handleMdmDeviceCommand(msg);
-                    return;
-                }
-                // mdm-script：服务端下发本机机型脚本，写入本地缓存。
-                if ("mdm-script".equals(type)) {
+                // device-script：服务端下发本机机型脚本，写入本地缓存。
+                if ("device-script".equals(type)) {
                     handleDeviceScript(msg);
                     return;
                 }
