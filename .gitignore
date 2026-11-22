@@ -18,3 +18,6 @@ captures/
 # 签名文件（如有，务必保密）
 *.jks
 *.keystore
+
+# 本地工作区数据（工作日志、会话状态），非项目源码
+.workbuddy/

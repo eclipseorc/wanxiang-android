@@ -2,13 +2,27 @@
 <!-- 无障碍服务配置（AutoAdbAccessibilityService）：全自动进开发者选项 →
      点「无线调试」→「使用配对码配对设备」→ 读取 6 位配对码与 IP:端口，
      再交给 LocalAdbManager 在设备本地完成配对并固化 5555 端口。
-     canRetrieveWindowContent 必须为 true 才能读取配对码与地址文本。
-     packageNames 需包含 com.android.settings（开发者选项宿主）。 -->
+
+     关键配置（缺一不可）：
+     1. canRetrieveWindowContent=true  → 读取配对码与地址文本、深度遍历节点树；
+     2. canPerformGestures=true        → 允许 dispatchGesture 执行滚动/滑动手势
+        （此前缺失导致「未找到目标、向下滚动」日志在打但手势被系统静默拒绝、
+         屏幕从不滚动、卡在开发者选项页面）。
+
+     重要教训：
+     - 不要加 flagRetrieveInteractiveWindows / typeWindowsChanged，会让服务去处理
+       「交互窗口」产生海量事件、导致服务被系统反复 bind/unbind（产生大量 DEAD
+       ConnectionRecord）、最终拖垮同进程的 ConnectionForegroundService 使 WebSocket 断线；
+     - 不要加 packageNames 限制：自动配对过程中前台窗口可能在「开发者选项页」与
+       「本 App / 锁屏」之间切换，若用 packageNames 限定只收 com.android.settings，
+       前台不是设置页时 getRootInActiveWindow() 会返回 null，引擎静默卡死直到超时。
+       这里不限定包名，靠 onAccessibilityEvent 内的事件类型白名单（只处理
+       windowStateChanged / windowContentChanged）来控制事件量，避免风暴。 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
+    android:accessibilityFlags="flagDefault|flagReportViewIds"
     android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
     android:description="@string/auto_adb_accessibility_desc"
-    android:notificationTimeout="100"
-    android:packageNames="com.android.settings" />
+    android:notificationTimeout="100" />

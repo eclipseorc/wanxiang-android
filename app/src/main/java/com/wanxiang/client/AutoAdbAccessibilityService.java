@@ -1,43 +1,48 @@
 package com.wanxiang.client;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 无障碍服务（MDM 本地自配对）：利用 Device Owner / MDM 权限静默激活后，自动完成
- * 「打开无线调试 → 点确认框 → 进入配对详情 → 读配对码与端口 → 本地配对并固化 5555」，
- * 最终让服务端用固定 {@code IP:5555} 稳定连接，无需每次重启都重新配对。
+ * 「打开无线调试 → 点开关 → 点确认框 → 读配对码 → 本地配对并固化 5555」，
+ * 最终让服务端用固定 {@code IP:5555} 稳定连接。
  *
- * <p>背景：Android 11+ 无线调试重启后自动关闭，且其连接端口每次动态分配，直接
- * {@code adb connect} 动态端口不稳定。本服务不依赖「快速设置磁贴」（实测 Motorola
- * 等机型无法把无线调试加入磁贴），而是直接进「开发者选项」点击「无线调试」这一
- * <b>列表项</b>打开开关，再读取系统弹出的 6 位配对码与配对端口，交给
- * {@link LocalAdbManager} 在<b>设备本地</b>完成配对，并执行 {@code tcpip 5555}
- * 把 adbd 切到固定 TCP 端口。整个过程纯无线、免插 USB、免 root。</p>
+ * <p><b>本服务不再包含任何机型知识。</b>「无线调试」在哪、开关文案是什么、要点
+ * 几下、确认框按钮叫什么——这些全部来自服务端下发、本地缓存的<b>机型脚本</b>
+ * （{@link DeviceScript}），由 {@link DeviceScriptEngine} 通用引擎执行。加新机型
+ * = 服务端加一份脚本，本服务与 APK 均无需改动。</p>
  *
- * <p>状态机流程：{@link #OPEN_TOGGLE 打开开关} → {@link #CONFIRM_DIALOG 点确认框}
- * → {@link #ENTER_DETAIL 进入详情} → {@link #CLICK_PAIR 点配对} → {@link #READ_CODE 读码配对}。</p>
+ * <p>本服务只负责三件事：</p>
+ * <ol>
+ *   <li>维护无障碍服务的生命周期与「自推进循环」（定时主动拉节点推进，不依赖
+ *       系统事件是否派发，保证「滚动→查找→点击」持续推进）；</li>
+ *   <li>触发自动配对时读取本地缓存的机型脚本；</li>
+ *   <li>把脚本交给 {@link DeviceScriptEngine} 逐步执行。</li>
+ * </ol>
  *
- * <p>前置条件（每台设备首次一次性、手机上手动完成）：
+ * <p>前置条件（每台设备首次一次性、手机上手动完成）：</p>
  * <ol>
  *   <li>开启开发者选项；</li>
- *   <li>本 App 通过二维码纳管为 Device Owner（用于静默激活无障碍服务）；</li>
+ *   <li>本 App 通过二维码纳管为 Device Owner；</li>
  *   <li>系统设置 → 无障碍 → 开启「万象设备端」；</li>
- *   <li>锁屏方式设为「无」（锁屏状态开机不运行用户代码）。</li>
+ *   <li>锁屏方式设为「无」。</li>
  * </ol>
- * </p>
  */
 public class AutoAdbAccessibilityService extends AccessibilityService {
     private static final String TAG = "MDM_A11yAdb";
@@ -45,43 +50,260 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
     /** 任务是否正在进行（供外部查询/去重）。 */
     public static volatile boolean isTaskRunning = false;
 
-    /** 流程阶段。 */
-    private static final int OPEN_TOGGLE = 0;    // 打开「无线调试」开关
-    private static final int CONFIRM_DIALOG = 1; // 点「允许无线调试」确认框
-    private static final int ENTER_DETAIL = 2;   // 点击进入「无线调试」详情页
-    private static final int CLICK_PAIR = 3;     // 点「使用配对码配对设备」
-    private static final int READ_CODE = 4;      // 读 6 位码 + IP:端口 并触发配对
+    /** 单次自动配对任务的超时（避免无限轮询）。 */
+    private static final long TASK_TIMEOUT_MS = 120_000L;
 
-    /** 单阶段最大等待时长，超时则本次任务放弃（避免无限轮询）。 */
-    private static final long STAGE_TIMEOUT_MS = 20_000L;
-
-    /** 当前所处阶段。 */
-    private int stage = OPEN_TOGGLE;
-    private long stageStartMs = 0L;
+    /** 自推进循环的节拍间隔。 */
+    private static final long ADVANCE_INTERVAL_MS = 800L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    /** 「允许无线调试」确认框可能出现的按钮文案（中英 + 常见变体）。 */
-    private static final String[] ALLOW_TEXTS = {
-            "允许", "允许调试", "允许无线调试", "确定", "同意",
-            "Allow", "OK", "Always allow", "Allow always",
+    /** 当前已连接的服务实例。startAutoPairTask 是 static 入口，需借此重启自推进循环
+     *  （否则循环在服务连接时因无任务而立即退出，之后再无人重启，引擎只能靠系统事件
+     *  推进；页面静止后不再有事件 → 卡死在开发者选项页）。 */
+    private static volatile AutoAdbAccessibilityService instance;
+
+    /** 重置引擎状态并（重新）启动自推进循环。必须在主线程调用。 */
+    private void restartSelfAdvance() {
+        engine = null;
+        nullRootCount = 0;
+        handler.removeCallbacks(selfAdvanceTask);
+        handler.postDelayed(selfAdvanceTask, ADVANCE_INTERVAL_MS);
+        Log.i(TAG, "self-advance loop (re)started");
+    }
+
+    /** 当前正在执行的引擎（含脚本与步骤进度）。 */
+    private DeviceScriptEngine engine;
+
+    /** 本次任务开始时间戳，用于整体超时兜底。static：既要在 static 的
+     *  startAutoPairTask 里初始化，又要在实例方法里读写（无障碍服务是系统单例）。 */
+    private static volatile long taskStartMs = 0L;
+
+    /** 任务期间保持屏幕常亮的 WakeLock。static：startAutoPairTask 是 static 入口，
+     *  申请后需在实例方法 cleanup/abort 里释放，故用 static 引用。 */
+    private static PowerManager.WakeLock screenWakeLock;
+
+    /** 自推进循环：定时主动拉取当前窗口节点并推进引擎，与事件驱动互补。 */
+    private final Runnable selfAdvanceTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!isTaskRunning) {
+                return;
+            }
+            // 自推进循环也要做超时保护：此前超时判断只在 onAccessibilityEvent 里，
+            // 若任务卡死且期间无任何无障碍事件（用户不碰屏幕），会「静默永久卡死」，
+            // 连「超时中止」都不会触发。这里补齐，保证卡死也能被超时兜底中止。
+            if (taskStartMs > 0 && System.currentTimeMillis() - taskStartMs > TASK_TIMEOUT_MS) {
+                Log.w(TAG, "self-advance task timeout, aborting");
+                abort("超时");
+                return;
+            }
+            try {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root != null) {
+                    nullRootCount = 0;
+                    try {
+                        step(root);
+                    } finally {
+                        root.recycle();
+                    }
+                } else {
+                    // root 为 null：通常是设备锁屏/Doze、或当前窗口不在无障碍服务
+                    // 关注范围内（packageNames 限制）。此前这里静默跳过，导致任务
+                    // 静默卡死数分钟直到超时却无任何日志。现在打诊断日志，并在连续
+                    // 多次拿不到 root 时主动重开开发者选项页 + 唤醒屏幕兜底。
+                    nullRootCount++;
+                    if (nullRootCount == 1) {
+                        Log.w(TAG, "getRootInActiveWindow returned null (screen locked or window out of scope)");
+                        DebugConsole.warn("A11Y", "拿不到当前窗口节点（可能锁屏/熄屏），尝试唤醒并重开开发者选项页…");
+                    }
+                    // 连续 3 次（约 2.4 秒）拿不到 root，主动唤醒 + 重开开发者选项页。
+                    if (nullRootCount == 3) {
+                        acquireScreenWakeLock(AutoAdbAccessibilityService.this);
+                        reopenDeveloperSettings();
+                    }
+                }
+            } catch (Throwable ignored) {
+                // 自推进过程中的异常不影响下一轮。
+            }
+            handler.postDelayed(this, ADVANCE_INTERVAL_MS);
+        }
     };
 
+    /** 连续拿不到 root 的计数（用于锁屏/窗口异常的兜底恢复）。 */
+    private int nullRootCount = 0;
+
+    /** 重新打开开发者选项页（root 拿不到时的兜底恢复）。 */
+    private void reopenDeveloperSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            Log.i(TAG, "reopened developer settings (null root recovery)");
+        } catch (Throwable t) {
+            Log.w(TAG, "reopen developer settings failed", t);
+        }
+    }
+
     /**
-     * 启动自动配对任务：拉起开发者选项页，进入状态机流程。
+     * 启动自动配对任务：读本地缓存的机型脚本，若存在则交给引擎执行。
      * 由开机广播（BootReceiver）或主界面「测试自动配对」按钮触发。
      */
     public static void startAutoPairTask(android.content.Context ctx) {
         isTaskRunning = true;
+        // 关键：任务启动即初始化计时起点，避免 taskStartMs 仍为 0 时，超时判断
+        // （System.currentTimeMillis() - taskStartMs > TASK_TIMEOUT_MS）因 taskStartMs=0
+        // 而立即成立、把任务误判为超时中止。
+        taskStartMs = System.currentTimeMillis();
+        // 关键修复：唤醒屏幕并保持常亮。自动配对要做 UI 自动化（滚动/点击/查找），
+        // 若手机熄屏（Dozing），无障碍服务拿不到有效窗口，滚动点击全部失效，
+        // 表现为「卡死在开发者选项页」。任务启动即唤醒 + 持 WakeLock，结束再释放。
+        acquireScreenWakeLock(ctx);
+        // 关键修复：任务期间禁用锁屏。设备进入锁屏/Doze 后 getRootInActiveWindow()
+        // 拿到的是锁屏窗口而非开发者选项页，引擎静默卡死。Device Owner 可禁用 keyguard。
+        disableKeyguard(ctx);
+        DebugConsole.info("A11Y", "自动配对任务启动，读取本地缓存的机型脚本");
+        // 读取本地缓存的机型脚本（由 ConnectionForegroundService 收到 mdm-script 时写入）。
+        DeviceScript script = DeviceScriptStore.load(ctx);
+        if (script == null) {
+            DebugConsole.error("A11Y", "本地无机型脚本！原因：服务端尚未下发、或设备未重连拉取。请先确认后台已为该型号添加脚本，再重连（或点「立即拉取脚本」）。");
+            isTaskRunning = false;
+            releaseScreenWakeLock();
+            reenableKeyguard(ctx);
+            return;
+        }
+        DebugConsole.success("A11Y", "已加载机型脚本：" + script.name + "（id=" + script.scriptId + "）v" + script.version + "，共 " + script.steps.size() + " 步");
+        // 关键修复：（重新）启动自推进循环。不依赖系统事件，保证页面静止时引擎也能持续推进。
+        final AutoAdbAccessibilityService svc = instance;
+        if (svc == null) {
+            DebugConsole.error("A11Y", "无障碍服务未连接！请在 系统设置 → 无障碍 中开启「万象设备端」后重试。");
+            isTaskRunning = false;
+            releaseScreenWakeLock();
+            reenableKeyguard(ctx);
+            return;
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            svc.restartSelfAdvance();
+        } else {
+            svc.handler.post(svc::restartSelfAdvance);
+        }
+        // 打开「开发者选项」页作为起点（脚本首个 launch 步骤会兜底再打开一次，
+        // 这里提前打开让界面尽早就绪）。
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        ctx.startActivity(intent);
+        try {
+            ctx.startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "open developer settings failed", e);
+            DebugConsole.error("A11Y", "打开开发者选项失败: " + e.getMessage());
+            isTaskRunning = false;
+            releaseScreenWakeLock();
+            reenableKeyguard(ctx);
+        }
+    }
+
+    /**
+     * 唤醒屏幕并申请保持常亮的 WakeLock。任务期间持续持有，任务结束（cleanup/abort）
+     * 时必须调用 {@link #releaseScreenWakeLock()} 释放，避免屏幕常亮不灭。
+     */
+    private static void acquireScreenWakeLock(Context ctx) {
+        try {
+            PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) {
+                return;
+            }
+            if (screenWakeLock == null || !screenWakeLock.isHeld()) {
+                // 用 FULL_WAKE_LOCK（deprecated 但最可靠）配合 ACQUIRE_CAUSES_WAKEUP：
+                // 仅 SCREEN_BRIGHT_WAKE_LOCK 只能维持亮度，不能阻止屏幕超时熄屏，
+                // 也不能在锁屏/Doze 状态下唤醒屏幕并保持。FULL_WAKE_LOCK 是旧 API 里
+                // 唯一同时「唤醒 + 保持屏幕常亮 + 关闭键盘灯」的锁。
+                int flags = PowerManager.SCREEN_BRIGHT_WAKE_LOCK
+                        | PowerManager.ACQUIRE_CAUSES_WAKEUP
+                        | PowerManager.ON_AFTER_RELEASE;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    // API 21+ 推荐用 setKeepScreenOn 之外的方式；但 WakeLock 仍可用。
+                }
+                screenWakeLock = pm.newWakeLock(flags, "wanxiang:auto-pair");
+                screenWakeLock.setReferenceCounted(false);
+            }
+            if (!screenWakeLock.isHeld()) {
+                // ACQUIRE_CAUSES_WAKEUP 会在 acquire 时唤醒屏幕并点亮。
+                screenWakeLock.acquire(TASK_TIMEOUT_MS + 10_000L);
+            }
+            Log.i(TAG, "screen wake lock acquired");
+        } catch (Throwable t) {
+            Log.w(TAG, "acquire screen wake lock failed", t);
+        }
+    }
+
+    /** 释放屏幕常亮 WakeLock（任务结束时调用）。 */
+    private static void releaseScreenWakeLock() {
+        try {
+            if (screenWakeLock != null && screenWakeLock.isHeld()) {
+                screenWakeLock.release();
+                Log.i(TAG, "screen wake lock released");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "release screen wake lock failed", t);
+        }
+    }
+
+    /**
+     * 任务期间禁用锁屏（Device Owner 能力）。这是自动配对的<b>关键前置</b>：
+     * 若设备进入锁屏/Doze，getRootInActiveWindow() 拿到的是锁屏窗口而非开发者选项页，
+     * 引擎拿不到有效节点、静默卡死直到超时。作为 Device Owner 可禁用 keyguard，
+     * 任务结束后恢复。
+     */
+    private static void disableKeyguard(Context ctx) {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            if (dpm == null || !dpm.isDeviceOwnerApp(ctx.getPackageName())) {
+                Log.w(TAG, "非 Device Owner，跳过禁用锁屏");
+                return;
+            }
+            ComponentName admin = MyDeviceAdminReceiver.getComponentName(ctx);
+            dpm.setKeyguardDisabled(admin, true);
+            Log.i(TAG, "keyguard disabled during task");
+        } catch (Throwable t) {
+            Log.w(TAG, "disable keyguard failed", t);
+        }
+    }
+
+    /** 恢复锁屏（任务结束时调用）。 */
+    private static void reenableKeyguard(Context ctx) {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            if (dpm == null || !dpm.isDeviceOwnerApp(ctx.getPackageName())) {
+                return;
+            }
+            ComponentName admin = MyDeviceAdminReceiver.getComponentName(ctx);
+            dpm.setKeyguardDisabled(admin, false);
+            Log.i(TAG, "keyguard re-enabled");
+        } catch (Throwable t) {
+            Log.w(TAG, "re-enable keyguard failed", t);
+        }
     }
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         Log.i(TAG, "service connected");
+        instance = this;
+        handler.removeCallbacks(selfAdvanceTask);
+        handler.post(selfAdvanceTask);
+    }
+
+    @Override
+    public boolean onUnbind(Intent intent) {
+        if (instance == this) {
+            instance = null;
+        }
+        handler.removeCallbacks(selfAdvanceTask);
+        isTaskRunning = false;
+        engine = null;
+        releaseScreenWakeLock();
+        reenableKeyguard(this);
+        return super.onUnbind(intent);
     }
 
     @Override
@@ -98,10 +320,10 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
             return;
         }
 
-        // 超时保护：单阶段停留过久则放弃本次任务，避免卡死。
-        if (stageStartMs > 0 && System.currentTimeMillis() - stageStartMs > STAGE_TIMEOUT_MS) {
-            Log.w(TAG, "stage " + stage + " timeout, aborting");
-            abort();
+        // 整体超时保护。
+        if (System.currentTimeMillis() - taskStartMs > TASK_TIMEOUT_MS) {
+            Log.w(TAG, "task timeout, aborting");
+            abort("超时");
             return;
         }
 
@@ -116,310 +338,113 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         }
     }
 
-    /** 根据当前阶段推进流程。 */
+    /** 推进引擎一步：若尚未创建引擎，先从缓存读脚本创建。 */
     private void step(AccessibilityNodeInfo root) {
-        switch (stage) {
-            case OPEN_TOGGLE:
-                handleOpenToggle(root);
-                break;
-            case CONFIRM_DIALOG:
-                handleConfirmDialog(root);
-                break;
-            case ENTER_DETAIL:
-                handleEnterDetail(root);
-                break;
-            case CLICK_PAIR:
-                handleClickPair(root);
-                break;
-            case READ_CODE:
-                handleReadCode(root);
-                break;
-            default:
-                break;
-        }
-    }
-
-    // 阶段 0：开发者选项页里找到「无线调试」列表项，若开关未开则点击打开。
-    private void handleOpenToggle(AccessibilityNodeInfo root) {
-        List<String> texts = new ArrayList<>();
-        collectTexts(root, texts);
-
-        // 若已能看到配对码弹窗（无线调试已开启且已进入），直接跳到读码阶段。
-        String code = findPairCode(texts);
-        String addr = findIpPort(texts);
-        if (code != null && addr != null) {
-            advanceTo(READ_CODE);
-            triggerPair(code, addr);
-            return;
-        }
-
-        // 找到「无线调试」列表项。
-        AccessibilityNodeInfo item = findNodeByText(root, "无线调试", "Wireless debugging");
-        if (item == null) {
-            scrollForward(root);
-            return;
-        }
-
-        // 判断该列表项是否为「已打开」状态。
-        boolean alreadyOn = isToggleOn(item);
-        if (alreadyOn) {
-            Log.i(TAG, "wireless debugging already on, entering detail");
-            advanceTo(ENTER_DETAIL);
-            performClick(item);
-        } else {
-            Log.i(TAG, "wireless debugging off, tapping to enable");
-            advanceTo(CONFIRM_DIALOG);
-            performClick(item);
-        }
-    }
-
-    // 阶段 1：处理「允许无线调试？」确认框，自动点「允许」。
-    private void handleConfirmDialog(AccessibilityNodeInfo root) {
-        // 找到确认框上的「允许」按钮。
-        AccessibilityNodeInfo allow = findAnyByTexts(root, ALLOW_TEXTS);
-        if (allow != null) {
-            AccessibilityNodeInfo clickable = allow.isClickable()
-                    ? allow : findClickableParent(allow);
-            if (clickable != null) {
-                Log.i(TAG, "clicking allow on wireless debugging confirm dialog");
-                advanceTo(ENTER_DETAIL);
-                clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        if (engine == null) {
+            DeviceScript script = DeviceScriptStore.load(this);
+            if (script == null) {
+                DebugConsole.error("A11Y", "本地无机型脚本，无法创建引擎。请先拉取脚本（重连或点「立即拉取脚本」）。");
+                abort("脚本缺失");
                 return;
             }
-        }
-
-        // 若确认框已消失（部分系统不弹或已自动关闭），且无线调试条目已出现，则进入详情。
-        AccessibilityNodeInfo item = findNodeByText(root, "无线调试", "Wireless debugging");
-        if (item != null) {
-            advanceTo(ENTER_DETAIL);
-            performClick(item);
-        }
-    }
-
-    // 阶段 2：点击进入「无线调试」详情页。
-    private void handleEnterDetail(AccessibilityNodeInfo root) {
-        // 详情页里应能看到「使用配对码配对设备」。
-        AccessibilityNodeInfo pair = findNodeByText(root,
-                "使用配对码配对设备", "使用配对码配对", "Pair device with pairing code");
-        if (pair != null) {
-            advanceTo(CLICK_PAIR);
-            performClick(pair);
-            return;
-        }
-        // 尚未进入详情页，尝试点击「无线调试」条目进入。
-        AccessibilityNodeInfo item = findNodeByText(root, "无线调试", "Wireless debugging");
-        if (item != null) {
-            performClick(item);
-        } else {
-            scrollForward(root);
-        }
-    }
-
-    // 阶段 3：点击「使用配对码配对设备」。
-    private void handleClickPair(AccessibilityNodeInfo root) {
-        AccessibilityNodeInfo pair = findNodeByText(root,
-                "使用配对码配对设备", "使用配对码配对", "Pair device with pairing code");
-        if (pair != null) {
-            advanceTo(READ_CODE);
-            performClick(pair);
-            return;
-        }
-        // 若配对码弹窗已直接出现，进入读码。
-        List<String> texts = new ArrayList<>();
-        collectTexts(root, texts);
-        String code = findPairCode(texts);
-        String addr = findIpPort(texts);
-        if (code != null && addr != null) {
-            advanceTo(READ_CODE);
-            triggerPair(code, addr);
-        }
-    }
-
-    // 阶段 4：读 6 位配对码与 IP:端口，触发本地配对。
-    private void handleReadCode(AccessibilityNodeInfo root) {
-        List<String> texts = new ArrayList<>();
-        collectTexts(root, texts);
-        String code = findPairCode(texts);
-        String addr = findIpPort(texts);
-        if (code != null && addr != null) {
-            triggerPair(code, addr);
-        }
-    }
-
-    // 读码成功后触发 LocalAdbManager 本地配对 + 固化 5555。
-    private void triggerPair(String code, String addr) {
-        if (code == null || addr == null) {
-            return;
-        }
-        isTaskRunning = false;
-        resetState();
-
-        int pairPort = extractPort(addr);
-        final String fCode = code;
-        Log.i(TAG, "pair code=" + code + " addr=" + addr + " port=" + pairPort);
-
-        LocalAdbManager.pairAndSwitchTo5555(this, pairPort, fCode, -1, new LocalAdbManager.Callback() {
-            @Override
-            public void onSuccess() {
-                performGlobalAction(GLOBAL_ACTION_HOME);
-                MdmDaemonService.notifyAdbReady(AutoAdbAccessibilityService.this);
-            }
-
-            @Override
-            public void onError(String err) {
-                Log.e(TAG, "自动配对失败: " + err);
-            }
-        });
-    }
-
-    // ---- 工具方法 ----
-
-    private void advanceTo(int newStage) {
-        stage = newStage;
-        stageStartMs = System.currentTimeMillis();
-        Log.i(TAG, "advance to stage " + stage);
-    }
-
-    private void abort() {
-        isTaskRunning = false;
-        resetState();
-        Log.w(TAG, "task aborted");
-    }
-
-    private void resetState() {
-        stage = OPEN_TOGGLE;
-        stageStartMs = 0L;
-    }
-
-    private void collectTexts(AccessibilityNodeInfo node, List<String> list) {
-        if (node == null) {
-            return;
-        }
-        CharSequence t = node.getText();
-        if (t != null) {
-            list.add(t.toString());
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            collectTexts(node.getChild(i), list);
-        }
-    }
-
-    /** 在所有文本里找 6 位纯数字配对码。 */
-    private String findPairCode(List<String> texts) {
-        Pattern p = Pattern.compile("^\\d{6}$");
-        for (String t : texts) {
-            if (p.matcher(t.trim()).matches()) {
-                return t.trim();
-            }
-        }
-        return null;
-    }
-
-    /** 在所有文本里找「IP:端口」形式的配对地址（IPv4）。 */
-    private String findIpPort(List<String> texts) {
-        Pattern p = Pattern.compile("\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+");
-        for (String t : texts) {
-            Matcher m = p.matcher(t);
-            if (m.find()) {
-                return m.group();
-            }
-        }
-        return null;
-    }
-
-    private int extractPort(String addr) {
-        int idx = addr.lastIndexOf(':');
-        if (idx < 0 || idx == addr.length() - 1) {
-            return -1;
-        }
-        try {
-            return Integer.parseInt(addr.substring(idx + 1));
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
-
-    /** 按文本关键词查找节点（返回文本命中的节点）。 */
-    private AccessibilityNodeInfo findNodeByText(AccessibilityNodeInfo root, String... keywords) {
-        for (String kw : keywords) {
-            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(kw);
-            if (nodes != null && !nodes.isEmpty()) {
-                return nodes.get(0);
-            }
-        }
-        return null;
-    }
-
-    /** 按多个候选文案查找任意一个可点击节点。 */
-    private AccessibilityNodeInfo findAnyByTexts(AccessibilityNodeInfo root, String[] keywords) {
-        for (String kw : keywords) {
-            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(kw);
-            if (nodes != null && !nodes.isEmpty()) {
-                for (AccessibilityNodeInfo n : nodes) {
-                    if (n.isClickable() || findClickableParent(n) != null) {
-                        return n;
-                    }
+            engine = new DeviceScriptEngine(this, script, new DeviceScriptEngine.ResultCallback() {
+                @Override
+                public void onSuccess() {
+                    DebugConsole.success("A11Y", "自动配对成功，任务完成");
+                    cleanup();
                 }
-            }
-        }
-        return null;
-    }
 
-    /** 判断「无线调试」列表项对应的开关是否已打开。 */
-    private boolean isToggleOn(AccessibilityNodeInfo item) {
-        // 从条目向上找，看是否有 Switch 且 checked=true。
-        AccessibilityNodeInfo curr = item;
-        while (curr != null) {
-            CharSequence cn = curr.getClassName();
-            if (cn != null) {
-                String name = cn.toString();
-                if (name.equals("android.widget.Switch") || name.contains("Switch")) {
-                    return curr.isChecked();
+                @Override
+                public void onError(String message) {
+                    DebugConsole.error("A11Y", "自动配对失败: " + message);
+                    cleanup();
                 }
-            }
-            curr = curr.getParent();
+            });
+            taskStartMs = System.currentTimeMillis();
+            DebugConsole.info("A11Y", "引擎就绪，开始执行脚本 " + script.name + " v" + script.version);
         }
-        // 未找到 Switch 时，检查条目文本是否含「已连接」等已开启特征。
-        CharSequence text = item.getText();
-        return text != null && (text.toString().contains("已连接")
-                || text.toString().contains("connected"));
+        boolean finished = engine.advance(root);
+        if (finished) {
+            // 已进入终态（成功或失败）。终态由引擎回调驱动，这里兜底清理。
+            cleanup();
+        }
     }
 
-    /** 找到可点击的父节点并点击。 */
-    private boolean performClick(AccessibilityNodeInfo node) {
-        AccessibilityNodeInfo clickable = node.isClickable() ? node : findClickableParent(node);
-        if (clickable != null) {
-            return clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        }
-        return false;
+    /** 清理任务状态（复位标志、释放引擎、停止自推进）。 */
+    private void cleanup() {
+        isTaskRunning = false;
+        engine = null;
+        taskStartMs = 0L;
+        handler.removeCallbacks(selfAdvanceTask);
+        releaseScreenWakeLock();
+        reenableKeyguard(this);
     }
 
-    private AccessibilityNodeInfo findClickableParent(AccessibilityNodeInfo node) {
-        AccessibilityNodeInfo curr = node;
-        while (curr != null) {
-            if (curr.isClickable()) {
-                return curr;
-            }
-            curr = curr.getParent();
-        }
-        return null;
-    }
-
-    private void scrollForward(AccessibilityNodeInfo node) {
-        if (node == null) {
-            return;
-        }
-        if (node.isScrollable()) {
-            node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
-            return;
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            scrollForward(node.getChild(i));
-        }
+    private void abort(String reason) {
+        isTaskRunning = false;
+        engine = null;
+        taskStartMs = 0L;
+        handler.removeCallbacks(selfAdvanceTask);
+        releaseScreenWakeLock();
+        reenableKeyguard(this);
+        Log.w(TAG, "task aborted: " + reason);
+        DebugConsole.warn("A11Y", "自动配对任务中止：[" + reason + "]");
     }
 
     @Override
     public void onInterrupt() {
-        resetState();
+        engine = null;
+        isTaskRunning = false;
+        releaseScreenWakeLock();
+        reenableKeyguard(this);
+    }
+
+    /**
+     * 机型脚本本地缓存的读写（文件 {@code device_script.json}）。
+     * 由 {@link ConnectionForegroundService} 收到 {@code mdm-script} 时写入；
+     * 触发自动配对时读取。做版本比较避免旧消息覆盖新脚本。
+     */
+    public static final class DeviceScriptStore {
+        private static final String FILE_NAME = "device_script.json";
+
+        private DeviceScriptStore() {
+        }
+
+        /** 写缓存（带版本比较）：新版本 ≤ 旧版本则忽略，返回是否已写入。 */
+        public static boolean save(android.content.Context ctx, String json, int version) {
+            DeviceScript existing = load(ctx);
+            if (existing != null && existing.version >= version) {
+                DebugConsole.info("SCRIPT", "忽略旧版本脚本 v" + version + "（当前 v" + existing.version + "）");
+                return false;
+            }
+            try (java.io.FileOutputStream out = ctx.openFileOutput(FILE_NAME, android.content.Context.MODE_PRIVATE)) {
+                out.write(json.getBytes(StandardCharsets.UTF_8));
+                DebugConsole.success("SCRIPT", "已缓存机型脚本 v" + version);
+                return true;
+            } catch (Exception e) {
+                DebugConsole.error("SCRIPT", "写机型脚本缓存失败: " + e.getMessage());
+                return false;
+            }
+        }
+
+        /** 读缓存，返回解析后的脚本；不存在或解析失败返回 null。 */
+        public static DeviceScript load(android.content.Context ctx) {
+            File f = new File(ctx.getFilesDir(), FILE_NAME);
+            if (!f.exists()) {
+                return null;
+            }
+            try (FileInputStream in = new FileInputStream(f)) {
+                byte[] buf = new byte[(int) f.length()];
+                int off = 0;
+                int n;
+                while (off < buf.length && (n = in.read(buf, off, buf.length - off)) != -1) {
+                    off += n;
+                }
+                return DeviceScript.parse(new String(buf, StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                DebugConsole.error("SCRIPT", "读机型脚本缓存失败: " + e.getMessage());
+                return null;
+            }
+        }
     }
 }

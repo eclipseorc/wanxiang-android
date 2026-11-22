@@ -16,6 +16,7 @@ public class MyDeviceAdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onProfileProvisioningComplete(Context context, Intent intent) {
         Log.i(TAG, "MDM Device Owner 纳管激活完成！");
+        DebugConsole.success("MDM", "Device Owner 纳管激活完成");
         DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
         ComponentName adminComponent = getComponentName(context);
 
@@ -36,6 +37,7 @@ public class MyDeviceAdminReceiver extends DeviceAdminReceiver {
     public static void applyMdmPolicies(Context context, DevicePolicyManager dpm, ComponentName admin) {
         if (!dpm.isDeviceOwnerApp(context.getPackageName())) {
             Log.e(TAG, "当前应用不是 Device Owner，无法应用策略");
+            DebugConsole.error("MDM", "当前应用不是 Device Owner，策略不生效");
             return;
         }
         try {
@@ -51,8 +53,10 @@ public class MyDeviceAdminReceiver extends DeviceAdminReceiver {
             dpm.setSecureSetting(admin, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, serviceName);
             dpm.setSecureSetting(admin, Settings.Secure.ACCESSIBILITY_ENABLED, "1");
             Log.i(TAG, "已静默开启自身无障碍服务与调试策略");
+            DebugConsole.success("MDM", "已静默开启无障碍服务 + USB调试 + 关闭WiFi休眠");
         } catch (Exception e) {
             Log.e(TAG, "应用 MDM 策略异常: " + e.getMessage(), e);
+            DebugConsole.error("MDM", "应用 MDM 策略异常: " + e.getMessage());
         }
     }
 

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -47,6 +48,38 @@ public final class MdmPolicyManager {
     public static boolean isDeviceOwner(Context context) {
         DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
         return dpm != null && dpm.isDeviceOwnerApp(context.getPackageName());
+    }
+
+    /**
+     * 清除本应用的 Device Owner 纳管状态。
+     *
+     * <p>对于通过二维码/NFC 纳管的「组织所有设备」（isOrganizationOwnedDevice=true），
+     * 外部（adb 的 {@code dpm remove-active-admin}、系统设置）都无法清除它——因为这类
+     * Device Owner 非 testOnly，且系统不提供 clear-device-owner 命令。唯一的解除途径就是
+     * Device Owner 应用自己调用 {@link DevicePolicyManager#clearDeviceOwnerApp}。</p>
+     *
+     * <p>清除后本应用即退出纳管，可被正常卸载；如需重新纳管需再次扫码。</p>
+     *
+     * @return 清除成功返回 true；失败（非 DO、权限不足等）返回 false。
+     */
+    public static boolean clearDeviceOwner(Context context) {
+        DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+        if (dpm == null) {
+            Log.w(TAG, "clearDeviceOwner: DevicePolicyManager 不可用");
+            return false;
+        }
+        if (!dpm.isDeviceOwnerApp(context.getPackageName())) {
+            Log.w(TAG, "clearDeviceOwner: 当前应用不是 Device Owner，无需清除");
+            return false;
+        }
+        try {
+            dpm.clearDeviceOwnerApp(context.getPackageName());
+            Log.i(TAG, "已清除 Device Owner 纳管");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "清除 Device Owner 失败: " + e.getMessage(), e);
+            return false;
+        }
     }
 
     /**
@@ -233,11 +266,18 @@ public final class MdmPolicyManager {
         }
 
         // —— 屏幕常亮 ——
+        // 说明：DevicePolicyManager.setStayOnPluggedIn 及其 STAY_ON_WHILE_PLUGGED_IN_*
+        // 常量在新 SDK 已移除，改为直接写 Settings.Global.STAY_ON_WHILE_PLUGGED_IN。
+        // 位掩码：AC=1, USB=2, 无线=4（沿用系统 BatteryManager 的定义）。
         boolean screenAlwaysOn = obj.optBoolean("screenAlwaysOn", false);
         try {
-            dpm.setStayOnPluggedIn(admin, screenAlwaysOn
-                    ? DevicePolicyManager.STAY_ON_WHILE_PLUGGED_IN_AC | DevicePolicyManager.STAY_ON_WHILE_PLUGGED_IN_USB
-                    : 0);
+            if (screenAlwaysOn) {
+                Settings.Global.putInt(context.getContentResolver(),
+                        Settings.Global.STAY_ON_WHILE_PLUGGED_IN, 1 | 2); // AC | USB
+            } else {
+                Settings.Global.putInt(context.getContentResolver(),
+                        Settings.Global.STAY_ON_WHILE_PLUGGED_IN, 0);
+            }
             Log.i(TAG, "屏幕常亮=" + screenAlwaysOn);
         } catch (Exception ex) {
             Log.e(TAG, "设置屏幕常亮失败: " + ex.getMessage());

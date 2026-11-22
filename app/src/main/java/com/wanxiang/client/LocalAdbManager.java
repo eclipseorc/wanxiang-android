@@ -1,10 +1,14 @@
 package com.wanxiang.client;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
+import androidx.core.content.ContextCompat;
 
 import android.sun.misc.BASE64Encoder;
 import android.sun.security.provider.X509Factory;
@@ -32,6 +36,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -70,49 +76,202 @@ public class LocalAdbManager {
         void onError(String err);
     }
 
+    /** 检查 USB 调试总开关（adb_enabled）是否开启，未开启时给出诊断提示。 */
+    private static void warnIfUsbDebuggingDisabled(Context context) {
+        try {
+            int enabled = Settings.Global.getInt(context.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
+            if (enabled == 0) {
+                Log.w(TAG, "USB 调试（adb_enabled）未开启，tcpip 5555 可能无法生效");
+                DebugConsole.warn("ADB", "检测到「USB 调试」未开启，5555 端口可能无法监听，请在开发者选项中开启 USB 调试");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 检测本机指定 TCP 端口是否已处于监听状态（不发起 ADB 认证握手，避免触发多余的 RSA 授权弹窗）。 */
+    private static boolean isLocalPortListening(int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress("127.0.0.1", port), 800);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     /**
-     * 配对并切换固定端口：配对 → 连接 → tcpip 5555。
+     * 利用已建立的本地 adbd 连接，自动为本应用自身授予 WRITE_SECURE_SETTINGS 权限。
+     * 首次通过无障碍完成本地配对并连上 adbd 后执行一次即可永久生效（即使手机重启也保留），
+     * 从而让后续所有重启/恢复直接走 trySilentSwitchTo5555 后台静默开启，彻底告别 UI 自动化。
+     */
+    private static void selfGrantWriteSecureSettings(Context context, SimpleAdbConnectionManager manager) {
+        try {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_SECURE_SETTINGS)
+                    == PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            String cmd = "shell:pm grant " + context.getPackageName() + " android.permission.WRITE_SECURE_SETTINGS";
+            AdbStream grantStream = manager.openStream(cmd);
+            try {
+                Thread.sleep(400);
+            } finally {
+                try {
+                    grantStream.close();
+                } catch (Throwable ignored) {
+                }
+            }
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_SECURE_SETTINGS)
+                    == PackageManager.PERMISSION_GRANTED) {
+                Log.i(TAG, "self-granted WRITE_SECURE_SETTINGS via local adbd");
+                DebugConsole.success("ADB", "已通过本地 adbd 自动授予 WRITE_SECURE_SETTINGS 权限（后续重启可后台静默秒开 5555）");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "selfGrantWriteSecureSettings failed: " + t.getMessage());
+        }
+    }
+
+    /** 向已连接的本地 adbd 自动赋权、发送 tcpip:5555 并轮询验证 127.0.0.1:5555 确实已监听。 */
+    private static boolean switchTo5555AndVerify(Context context, SimpleAdbConnectionManager manager) throws Exception {
+        // 首次连上本地 adbd 时，顺手给自己授予 WRITE_SECURE_SETTINGS（必须在 tcpip:5555 重启 adbd 之前执行）。
+        selfGrantWriteSecureSettings(context, manager);
+        DebugConsole.info("ADB", "已连接本地 adbd，发送 tcpip 5555 固化端口");
+        AdbStream stream = manager.openStream("tcpip:5555");
+        try {
+            Thread.sleep(1000);
+        } finally {
+            try {
+                stream.close();
+            } catch (Throwable ignored) {
+            }
+            try {
+                manager.disconnect();
+            } catch (Throwable ignored) {
+            }
+        }
+        // adbd 收到 tcpip:5555 后会重启并监听 5555，用纯 TCP 探测端口已打开，
+        // 避免用 manager.connect("127.0.0.1", 5555) 发起非 TLS 的 ADB 握手而触发系统的「允许 USB 调试吗？」弹窗。
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            Thread.sleep(800);
+            if (isLocalPortListening(5555)) {
+                Log.i(TAG, "验证 127.0.0.1:5555 端口已监听（第 " + attempt + " 次）");
+                DebugConsole.success("ADB", "已固化并验证 5555 端口可用");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 开机快速恢复通道：若设备已完成过首次配对（存在本地密钥）且已获授 WRITE_SECURE_SETTINGS，
+     * 直接开启无线调试并复用已配对密钥重连、切换 5555；任一步不满足则通过 onError 回退到无障碍流程。
+     */
+    @RequiresApi(api = Build.VERSION_CODES.R)
+    public static void trySilentSwitchTo5555(Context context, Callback cb) {
+        final Context appCtx = context.getApplicationContext();
+        executor.execute(() -> {
+            try {
+                warnIfUsbDebuggingDisabled(appCtx);
+                if (!SimpleAdbConnectionManager.hasPersistedKeys(appCtx)) {
+                    cb.onError("尚未完成首次配对（无本地密钥）");
+                    return;
+                }
+                SimpleAdbConnectionManager manager = SimpleAdbConnectionManager.getInstance(appCtx);
+                if (isLocalPortListening(5555)) {
+                    DebugConsole.success("ADB", "5555 端口已处于监听状态");
+                    cb.onSuccess();
+                    return;
+                }
+                boolean hasPerm = ContextCompat.checkSelfPermission(appCtx, Manifest.permission.WRITE_SECURE_SETTINGS)
+                        == PackageManager.PERMISSION_GRANTED;
+                if (!hasPerm) {
+                    cb.onError("未授予 WRITE_SECURE_SETTINGS");
+                    return;
+                }
+                Settings.Global.putInt(appCtx.getContentResolver(), "adb_wifi_enabled", 1);
+                DebugConsole.info("ADB", "已开启无线调试，等待 adbd 就绪…");
+                Thread.sleep(2000);
+                try {
+                    manager.disconnect();
+                } catch (Throwable ignored) {
+                }
+                // 关键：必须用 connectTls（只搜 _adb-tls-connect._tcp），不能用 autoConnect。
+                // autoConnect 会同时搜 _adb._tcp（非 TLS 的 5555），用无线配对密钥连非 TLS 端口会触发「允许 USB 调试吗？」弹窗。
+                if (!manager.connectTls(appCtx, 8000)) {
+                    cb.onError("自动发现本地无线调试 TLS 端口失败");
+                    return;
+                }
+                if (switchTo5555AndVerify(appCtx, manager)) {
+                    cb.onSuccess();
+                } else {
+                    cb.onError("tcpip:5555 发送后验证 127.0.0.1:5555 失败");
+                }
+            } catch (Exception e) {
+                cb.onError(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            }
+        });
+    }
+
+    /**
+     * 配对并切换固定端口：配对 → 连接 → tcpip 5555 → 验证 5555 可用。
      *
      * @param pairPort    无线调试配对端口（从系统弹窗读取）
      * @param pairCode    6 位配对码（从系统弹窗读取）
-     * @param connectPort 配对后的连接端口（可能为空，用 -1 表示靠 autoConnect 自动发现）
+     * @param connectPort 配对后的连接端口（从无线调试主页读取，-1 表示靠 autoConnect 自动发现）
      */
     @RequiresApi(api = Build.VERSION_CODES.R)
     public static void pairAndSwitchTo5555(Context context, int pairPort, String pairCode, int connectPort, Callback cb) {
+        final Context appCtx = context.getApplicationContext();
         executor.execute(() -> {
             try {
-                SimpleAdbConnectionManager manager = SimpleAdbConnectionManager.getInstance(context);
+                warnIfUsbDebuggingDisabled(appCtx);
+                SimpleAdbConnectionManager manager = SimpleAdbConnectionManager.getInstance(appCtx);
                 // 1. 执行本地无线调试配对
                 Log.i(TAG, "正在配对 127.0.0.1:" + pairPort + " 配对码: " + pairCode);
+                DebugConsole.info("ADB", "开始配对 127.0.0.1:" + pairPort);
                 boolean paired = manager.pair("127.0.0.1", pairPort, pairCode);
                 if (!paired) {
                     cb.onError("ADB 本地配对失败");
+                    DebugConsole.error("ADB", "配对握手失败");
                     return;
                 }
                 Log.i(TAG, "配对成功！等待系统刷新连接端口...");
+                DebugConsole.success("ADB", "配对握手成功");
                 Thread.sleep(1000);
 
-                // 2. 连接无线调试端口并切换为固定 5555 TCP 端口
-                // 注意：部分系统配对后需要重新获取主页面的连接端口，也可通过 mDNS 自动发现
-                boolean connected = manager.autoConnect(context, 5000);
+                // 2. 连接无线调试 TLS 端口并切换为固定 5555 TCP 端口
+                // 关键：必须使用 connectTls（仅发现 _adb-tls-connect._tcp），不能用 autoConnect！
+                // autoConnect 会同时监听 _adb._tcp（传统非 TLS 端口），一旦命中非 TLS 端口，
+                // 无线配对的临时密钥不被传统 USB 调试认可，就会立刻弹出「允许 USB 调试吗？」RSA 授权框。
+                try {
+                    manager.disconnect();
+                } catch (Throwable ignored) {
+                }
+                boolean connected = false;
+                try {
+                    connected = manager.connectTls(appCtx, 5000);
+                } catch (Throwable t) {
+                    Log.w(TAG, "connectTls failed, will try fallback connectPort: " + t.getMessage());
+                }
                 if (!connected && connectPort > 0) {
+                    DebugConsole.info("ADB", "mDNS 未发现 TLS 端口，回退直连主页端口 127.0.0.1:" + connectPort);
                     connected = manager.connect("127.0.0.1", connectPort);
                 }
 
                 if (connected) {
-                    // 发送 tcpip 5555 指令，固化调试端口。
-                    // libadb 以 host 身份连接本地 adbd，tcpip 是 adb 的 host 服务，
-                    // destination 直接写 "tcpip:<port>" 即可（等价于 adb tcpip 5555）。
-                    AdbStream stream = manager.openStream("tcpip:5555");
-                    Thread.sleep(1000);
-                    stream.close();
-                    Log.i(TAG, "成功切换至固定 5555 端口！");
-                    cb.onSuccess();
+                    if (switchTo5555AndVerify(appCtx, manager)) {
+                        Log.i(TAG, "成功切换至固定 5555 端口！");
+                        cb.onSuccess();
+                    } else {
+                        String msg = "已发送 tcpip:5555，但未能验证 127.0.0.1:5555 可达（请确认 USB 调试已开启）";
+                        DebugConsole.error("ADB", msg);
+                        cb.onError(msg);
+                    }
                 } else {
                     cb.onError("配对后连接本地 ADB 失败");
+                    DebugConsole.error("ADB", "配对后连接本地 adbd 失败");
                 }
             } catch (Exception e) {
                 Log.e(TAG, "本地 ADB 操作异常", e);
+                DebugConsole.error("ADB", "本地 ADB 操作异常: " + e.getMessage());
                 cb.onError(e.getMessage());
             }
         });
@@ -132,6 +291,12 @@ public class LocalAdbManager {
                 instance = new SimpleAdbConnectionManager(context);
             }
             return instance;
+        }
+
+        public static boolean hasPersistedKeys(Context context) {
+            File keyFile = new File(context.getFilesDir(), "adb_priv.key");
+            File certFile = new File(context.getFilesDir(), "adb_cert.pem");
+            return keyFile.exists() && certFile.exists();
         }
 
         private SimpleAdbConnectionManager(Context context) throws Exception {

@@ -32,11 +32,38 @@ public class BootReceiver extends BroadcastReceiver {
             return;
         }
         try {
-            // 开机后拉起 MDM 本地自配对流程（进开发者选项点「无线调试」开关 → 读码配对 → 固化 5555）。
-            AutoAdbAccessibilityService.startAutoPairTask(context);
-            Log.i(TAG, "boot completed, requested MDM auto-pair task");
+            final Context appCtx = context.getApplicationContext();
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                final PendingResult pending = goAsync();
+                DebugConsole.info("BOOT", "开机广播：尝试快速恢复 5555 端口…");
+                LocalAdbManager.trySilentSwitchTo5555(appCtx, new LocalAdbManager.Callback() {
+                    @Override
+                    public void onSuccess() {
+                        try {
+                            DebugConsole.success("BOOT", "开机快速恢复 5555 端口成功");
+                            MdmDaemonService.notifyAdbReady(appCtx);
+                        } finally {
+                            pending.finish();
+                        }
+                    }
+
+                    @Override
+                    public void onError(String err) {
+                        try {
+                            Log.i(TAG, "silent switch to 5555 unavailable (" + err + "), fallback to A11Y auto-pair");
+                            DebugConsole.info("BOOT", "快速恢复不可用（" + err + "），回退无障碍自动配对");
+                            AutoAdbAccessibilityService.startAutoPairTask(appCtx);
+                        } finally {
+                            pending.finish();
+                        }
+                    }
+                });
+            } else {
+                AutoAdbAccessibilityService.startAutoPairTask(appCtx);
+            }
         } catch (Exception e) {
             Log.e(TAG, "start auto-pair task failed", e);
+            DebugConsole.error("BOOT", "开机触发自动配对失败: " + e.getMessage());
         }
 
         // 开机自启：读取服务端下发的自启列表，逐个拉起目标应用。

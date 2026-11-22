@@ -67,6 +67,9 @@ public class ConnectionForegroundService extends Service {
     public static final String ACTION_STATE = "com.wanxiang.client.action.STATE";
     public static final String EXTRA_STATE = "state";
 
+    // 应用内广播：请求前台服务立即拉取一次机型脚本（供设置页「立即拉取脚本」按钮）。
+    public static final String ACTION_PULL_SCRIPT = "com.wanxiang.client.action.PULL_SCRIPT";
+
     // 心跳间隔与重连退避。
     private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
     private static final long RECONNECT_BASE_MS = 1_000L;
@@ -90,6 +93,19 @@ public class ConnectionForegroundService extends Service {
             String lanIp = intent.getStringExtra(MdmDaemonService.EXTRA_LAN_IP);
             int port = intent.getIntExtra(MdmDaemonService.EXTRA_ADB_PORT, 5555);
             sendAdbReady(lanIp, port);
+        }
+    };
+
+    // 监听「立即拉取脚本」广播，收到后立即向服务端拉取一次机型脚本。
+    private final BroadcastReceiver pullScriptReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            DebugConsole.info("SCRIPT", "收到「立即拉取脚本」请求");
+            if (socket == null || !connected) {
+                DebugConsole.warn("SCRIPT", "当前 WebSocket 未连接，无法拉取脚本。请先连接服务器。");
+                return;
+            }
+            pullDeviceScript();
         }
     };
 
@@ -127,6 +143,12 @@ public class ConnectionForegroundService extends Service {
         } else {
             registerReceiver(adbReadyReceiver, filter);
         }
+        IntentFilter pullFilter = new IntentFilter(ACTION_PULL_SCRIPT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pullScriptReceiver, pullFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(pullScriptReceiver, pullFilter);
+        }
     }
 
     @Override
@@ -160,6 +182,11 @@ public class ConnectionForegroundService extends Service {
             unregisterReceiver(adbReadyReceiver);
         } catch (IllegalArgumentException ignored) {
             // 极端生命周期下 receiver 未注册，忽略。
+        }
+        try {
+            unregisterReceiver(pullScriptReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // 同上。
         }
         if (heartbeatThread != null) {
             heartbeatThread.quitSafely();
@@ -281,6 +308,7 @@ public class ConnectionForegroundService extends Service {
     private void sendAdbReady(String lanIp, int port) {
         WebSocket ws = socket;
         if (ws == null) {
+            DebugConsole.warn("WS", "上报 adb-ready 时 WebSocket 未连接，丢弃");
             return;
         }
         try {
@@ -289,6 +317,7 @@ public class ConnectionForegroundService extends Service {
             msg.put("lan_ip", lanIp);
             msg.put("adb_port", port);
             ws.send(msg.toString());
+            DebugConsole.info("WS", "已上报 adb-ready: " + lanIp + ":" + port);
         } catch (Exception ignored) {
             // 发送失败不抛出。
         }
@@ -333,8 +362,10 @@ public class ConnectionForegroundService extends Service {
         }
         if (connected) {
             nm.cancel(NOTIFICATION_ADB_ID);
+            DebugConsole.info("ADB", "服务端通知：ADB 已恢复在线");
             return;
         }
+        DebugConsole.warn("ADB", "服务端通知：ADB 掉线，需恢复无线调试");
         showAdbAlertNotification(nm);
     }
 
@@ -347,6 +378,47 @@ public class ConnectionForegroundService extends Service {
         try {
             ws.send("{\"type\":\"mdm-pull-policy\"}");
         } catch (Exception ignored) {
+        }
+    }
+
+    // pullDeviceScript 连接建立后请求服务端下发本机机型脚本（按 model 匹配）。
+    private void pullDeviceScript() {
+        WebSocket ws = socket;
+        if (ws == null) {
+            return;
+        }
+        try {
+            ws.send("{\"type\":\"mdm-pull-script\"}");
+            DebugConsole.info("SCRIPT", "已发送脚本拉取请求（mdm-pull-script），等待服务端下发…");
+        } catch (Exception e) {
+            DebugConsole.error("SCRIPT", "发送脚本拉取请求失败: " + e.getMessage());
+        }
+    }
+
+    // handleDeviceScript 处理服务端下发的机型脚本：版本比较后写入本地缓存。
+    // 脚本是「配置」不是「命令」，此处只落缓存，真正执行在触发自动配对时。
+    private void handleDeviceScript(JSONObject msg) {
+        if (msg == null) {
+            return;
+        }
+        if (!msg.optBoolean("found", false)) {
+            String model = msg.optString("model", "unknown");
+            DebugConsole.warn("SCRIPT", "服务端未匹配到本机型号脚本（本机 model=" + model + "），本次不自动配对。请到后台「机型脚本」为该型号添加脚本。");
+            return;
+        }
+        JSONObject script = msg.optJSONObject("script");
+        if (script == null) {
+            DebugConsole.error("SCRIPT", "收到 mdm-script 但缺少 script 字段");
+            return;
+        }
+        int version = script.optInt("version", 0);
+        String scriptId = script.optString("scriptId", "");
+        String name = script.optString("name", "");
+        DebugConsole.info("SCRIPT", "收到服务端下发脚本：" + name + "（id=" + scriptId + "）v" + version);
+        // 把 script 对象序列化为 JSON 字符串缓存；DeviceScriptStore.save 内部做版本比较。
+        boolean saved = AutoAdbAccessibilityService.DeviceScriptStore.save(this, script.toString(), version);
+        if (saved) {
+            DebugConsole.success("SCRIPT", "脚本已写入本地缓存：" + name + " v" + version + "（重连或触发配对时生效）");
         }
     }
 
@@ -509,8 +581,7 @@ public class ConnectionForegroundService extends Service {
     // —— 辅助 ——
 
     private String deviceId() {
-        SharedPreferences prefs = getSharedPreferences("wanxiang_device", MODE_PRIVATE);
-        return prefs.getString("device_id", "");
+        return SettingsFragment.getOrCreateDeviceId(this);
     }
 
     private String buildApiBase() {
@@ -601,8 +672,11 @@ public class ConnectionForegroundService extends Service {
             reconnectDelayMs = RECONNECT_BASE_MS; // 连接成功，重置退避
             notifyState("online");
             startHeartbeat();
+            DebugConsole.success("WS", "WebSocket 已连接");
             // 连接建立后主动拉取一次全局 MDM 策略，确保策略在设备端落地。
             pullMdmPolicy();
+            // 同时拉取本机机型脚本（按 model 匹配），供自动配对使用。
+            pullDeviceScript();
         }
 
         @Override
@@ -633,6 +707,11 @@ public class ConnectionForegroundService extends Service {
                     handleMdmDeviceCommand(msg);
                     return;
                 }
+                // mdm-script：服务端下发本机机型脚本，写入本地缓存。
+                if ("mdm-script".equals(type)) {
+                    handleDeviceScript(msg);
+                    return;
+                }
             } catch (Exception ignored) {
             }
         }
@@ -647,6 +726,7 @@ public class ConnectionForegroundService extends Service {
             connected = false;
             if (!userStopped) {
                 scheduleReconnect();
+                DebugConsole.warn("WS", "连接关闭(code=" + code + ")，自动重连中");
             }
         }
 
@@ -655,6 +735,7 @@ public class ConnectionForegroundService extends Service {
             connected = false;
             if (!userStopped) {
                 scheduleReconnect();
+                DebugConsole.error("WS", "连接失败: " + (t != null ? t.getMessage() : "unknown"));
             }
         }
     }
