@@ -12,6 +12,8 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="万象设备端"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Wanxiang">
