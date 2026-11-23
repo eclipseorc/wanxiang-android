@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 半透明白底胶囊（用于深色渐变卡片上的操作按钮） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#2EFFFFFF" />
+    <corners android:radius="999dp" />
+</shape>

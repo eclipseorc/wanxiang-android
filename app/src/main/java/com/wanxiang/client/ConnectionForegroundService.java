@@ -74,6 +74,11 @@ public class ConnectionForegroundService extends Service {
     private volatile WebSocket socket;
     private volatile boolean userStopped;      // 用户是否主动要求停止（停止后不重连）
     private volatile boolean connected;         // 当前是否已连接
+    private static volatile boolean lastKnownConnected = false;
+
+    public static boolean isConnected() {
+        return lastKnownConnected;
+    }
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private HandlerThread heartbeatThread;
@@ -158,6 +163,9 @@ public class ConnectionForegroundService extends Service {
         }
         // 默认：开始（或恢复）连接。
         userStopped = false;
+        if (connected && socket != null) {
+            notifyState("online");
+        }
         ensureConnected();
         return START_STICKY;
     }
@@ -279,6 +287,9 @@ public class ConnectionForegroundService extends Service {
         WebSocket ws = socket;
         if (ws == null) {
             return;
+        }
+        if (connected) {
+            lastKnownConnected = true;
         }
         try {
             JSONObject msg = new JSONObject();
@@ -501,6 +512,7 @@ public class ConnectionForegroundService extends Service {
     // notifyState 通过应用内广播把连接状态通知给 MainActivity。
     // 用 setPackage 把广播限制在本应用内，避免 Android 8.0+ 隐式广播限制。
     private void notifyState(String state) {
+        lastKnownConnected = "online".equals(state);
         Intent intent = new Intent(ACTION_STATE);
         intent.putExtra(EXTRA_STATE, state);
         intent.setPackage(getPackageName());
@@ -544,6 +556,16 @@ public class ConnectionForegroundService extends Service {
             DebugConsole.success("WS", "WebSocket 已连接");
             // 连接建立后拉取本机机型脚本（按 model 匹配），供自动配对使用。
             pullDeviceScript();
+            // 若本机 5555 端口已处于监听状态（如服务端重启或 WS 断线重连），立即补报一次 adb-ready，
+            // 让服务端立刻执行 adb connect 恢复「自动模式 + 在线」，无需等待周期巡检。
+            heartbeatHandler.post(() -> {
+                if (LocalAdbManager.isLocalPortListening(5555)) {
+                    String ip = getLocalIpAddress();
+                    if (ip != null && !ip.isEmpty()) {
+                        sendAdbReady(ip, 5555);
+                    }
+                }
+            });
         }
 
         @Override

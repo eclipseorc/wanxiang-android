@@ -1,25 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/bg">
 
-    <!-- 顶部品牌区 -->
+    <!-- 1. 统一高度顶部栏（与设置页严格对齐） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingLeft="20dp"
-        android:paddingRight="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="12dp">
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp">
 
         <LinearLayout
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="@drawable/bg_device_id"
             android:gravity="center"
             android:orientation="vertical">
@@ -28,9 +29,9 @@
                 android:layout_height="wrap_content"
                 android:text="万象"
                 android:textColor="@color/white"
-                android:textSize="14sp"
+                android:textSize="12.5sp"
                 android:textStyle="bold"
-                android:letterSpacing="0.08" />
+                android:letterSpacing="0.06" />
         </LinearLayout>
 
         <LinearLayout
@@ -38,91 +39,453 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:layout_marginLeft="12dp">
+            android:layout_marginLeft="10dp"
+            android:layout_marginRight="8dp">
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="万象设备端"
                 android:textColor="@color/ink"
-                android:textSize="18sp"
+                android:textSize="16sp"
                 android:textStyle="bold" />
             <TextView
+                android:id="@+id/homeSubtitleView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="1dp"
                 android:text="设备运行监控台"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="11.5sp"
+                android:singleLine="true"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <!-- 在线状态胶囊（真实 6dp 小圆点 View） -->
+        <LinearLayout
+            android:id="@+id/homeConnBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_pill_danger"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
+
+            <View
+                android:id="@+id/homeConnDot"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:background="@drawable/bg_dot_danger" />
+
+            <TextView
+                android:id="@+id/homeConnText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="5dp"
+                android:text="未连接"
+                android:textColor="@color/danger"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 广告位占位容器 -->
-    <FrameLayout
+    <!-- 2. 扩宽科技感三图轮播广告位 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/adBannerCard"
         android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:layout_marginLeft="20dp"
-        android:layout_marginRight="20dp"
-        android:layout_marginBottom="12dp"
-        android:background="@drawable/bg_card"
-        android:gravity="center">
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="广告位"
-            android:textColor="@color/faint"
-            android:textSize="14sp"
-            android:letterSpacing="0.2" />
-    </FrameLayout>
+        android:layout_height="156dp"
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="12dp"
+        android:layout_marginBottom="10dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp">
 
-    <!-- Console 标题栏 -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <ViewFlipper
+                android:id="@+id/adViewFlipper"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:inAnimation="@android:anim/fade_in"
+                android:outAnimation="@android:anim/fade_out">
+
+                <!-- 轮播图 1：万象云控 -->
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ad_banner_1"
+                    android:contentDescription="万象云控" />
+
+                <!-- 轮播图 2：自动化矩阵 -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ad_banner_2"
+                        android:contentDescription="自动化矩阵" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_vertical|left"
+                        android:layout_marginLeft="22dp"
+                        android:layout_marginTop="28dp"
+                        android:text="百台真机并发群控 · 7×24h 静默自愈"
+                        android:textColor="#A5F3FC"
+                        android:textSize="11sp" />
+                </FrameLayout>
+
+                <!-- 轮播图 3：智能 RPA 引擎 -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ad_banner_3"
+                        android:contentDescription="智能 RPA 引擎" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_vertical|left"
+                        android:layout_marginLeft="22dp"
+                        android:layout_marginTop="28dp"
+                        android:text="零代码拖拽编排 · 视觉控件智能拾取"
+                        android:textColor="#99F6E4"
+                        android:textSize="11sp" />
+                </FrameLayout>
+            </ViewFlipper>
+
+            <!-- 底部轮播指示点 -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <View
+                    android:id="@+id/adDot0"
+                    android:layout_width="16dp"
+                    android:layout_height="4dp"
+                    android:layout_marginLeft="3dp"
+                    android:layout_marginRight="3dp"
+                    android:background="@drawable/bg_carousel_dot_active" />
+
+                <View
+                    android:id="@+id/adDot1"
+                    android:layout_width="6dp"
+                    android:layout_height="4dp"
+                    android:layout_marginLeft="3dp"
+                    android:layout_marginRight="3dp"
+                    android:background="@drawable/bg_carousel_dot_inactive" />
+
+                <View
+                    android:id="@+id/adDot2"
+                    android:layout_width="6dp"
+                    android:layout_height="4dp"
+                    android:layout_marginLeft="3dp"
+                    android:layout_marginRight="3dp"
+                    android:background="@drawable/bg_carousel_dot_inactive" />
+            </LinearLayout>
+        </FrameLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 3. V2 一体式三列数据面板卡片（告别三个零碎窄框） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingLeft="20dp"
-        android:paddingRight="20dp"
-        android:paddingBottom="8dp">
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="12dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_card"
+        android:paddingTop="11dp"
+        android:paddingBottom="11dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp">
 
-        <TextView
+        <!-- 列 1：ADB 端口 -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="运行日志 Console"
-            android:textColor="@color/ink"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:orientation="vertical"
+            android:paddingLeft="10dp"
+            android:paddingRight="8dp">
 
-        <TextView
-            android:id="@+id/consoleCountView"
-            android:layout_width="wrap_content"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ADB 端口"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <View
+                    android:id="@+id/homeAdbDot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/bg_dot_success" />
+
+                <TextView
+                    android:id="@+id/homeAdbPortView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="5dp"
+                    android:text=":5555 就绪"
+                    android:textColor="@color/success"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:singleLine="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#EEF2F6" />
+
+        <!-- 列 2：恢复模式 -->
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="0 条"
-            android:textColor="@color/muted"
-            android:textSize="12sp" />
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingLeft="12dp"
+            android:paddingRight="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="恢复模式"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/homeRecoverModeView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="静默秒开"
+                android:textColor="@color/brand"
+                android:textSize="12.5sp"
+                android:textStyle="bold"
+                android:singleLine="true" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="28dp"
+            android:background="#EEF2F6" />
+
+        <!-- 列 3：局域网 IP -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.15"
+            android:orientation="vertical"
+            android:paddingLeft="12dp"
+            android:paddingRight="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="局域网 IP"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/homeLanIpView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="—"
+                android:textColor="@color/ink"
+                android:textSize="12.5sp"
+                android:textStyle="bold"
+                android:typeface="monospace"
+                android:singleLine="true"
+                android:ellipsize="end" />
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Console 日志区（可滚动，等宽字体） -->
-    <ScrollView
-        android:id="@+id/consoleScroll"
+    <!-- 4. V2 现代浅色系圆角 Console 卡片（白底圆角外框 + #F8FAFC 柔和浅灰内胆） -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:fillViewport="true"
-        android:scrollbars="vertical"
-        android:background="@color/ink">
+        android:layout_marginLeft="12dp"
+        android:layout_marginRight="12dp"
+        android:layout_marginBottom="10dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_card">
 
-        <TextView
-            android:id="@+id/consoleView"
+        <!-- 卡片顶栏 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="12dp"
-            android:text="等待日志…"
-            android:textColor="#E6EDF3"
-            android:textSize="12sp"
-            android:typeface="monospace"
-            android:lineSpacingExtra="3dp"
-            tools:ignore="HardcodedText" />
-    </ScrollView>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingLeft="14dp"
+            android:paddingRight="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="9dp">
+
+            <!-- 品牌蓝竖条指示器 -->
+            <View
+                android:layout_width="4dp"
+                android:layout_height="14dp"
+                android:background="@drawable/bg_brand_bar" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="8dp"
+                android:text="运行日志"
+                android:textColor="@color/ink"
+                android:textSize="13.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/consoleCountView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="7dp"
+                android:background="@drawable/bg_pill_brand"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:text="0 条"
+                android:textColor="@color/brand"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/consoleCopyBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_ghost_btn"
+                android:paddingLeft="10dp"
+                android:paddingRight="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:text="复制"
+                android:textColor="#475467"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/consoleClearBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="6dp"
+                android:background="@drawable/bg_ghost_btn"
+                android:paddingLeft="10dp"
+                android:paddingRight="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:text="清空"
+                android:textColor="#475467"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#EEF2F6" />
+
+        <!-- 柔和浅灰代码内胆 -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_margin="10dp"
+            android:background="@drawable/bg_console_inner">
+
+            <!-- 日志滚动区 -->
+            <ScrollView
+                android:id="@+id/consoleScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="true"
+                android:scrollbars="vertical">
+
+                <TextView
+                    android:id="@+id/consoleView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="10dp"
+                    android:text=""
+                    android:textColor="#334155"
+                    android:textSize="11.5sp"
+                    android:typeface="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+
+            <!-- 空状态引导（当日志为 0 条时展示） -->
+            <LinearLayout
+                android:id="@+id/consoleEmptyBox"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:background="@drawable/bg_pill_brand"
+                    android:gravity="center"
+                    android:text="✦"
+                    android:textColor="@color/brand"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="暂无运行日志"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="设备连接、心跳与 ADB 自恢复过程将在此实时输出"
+                    android:textColor="@color/faint"
+                    android:textSize="11sp"
+                    android:gravity="center" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
 
 </LinearLayout>

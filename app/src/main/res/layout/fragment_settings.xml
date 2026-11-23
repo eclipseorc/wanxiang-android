@@ -1,352 +1,768 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:scrollbars="none"
+    android:orientation="vertical"
     android:background="@color/bg">
 
+    <!-- 1. 与主页严格对齐的顶部标题栏（切换 Tab 不跳动） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingLeft="20dp"
-        android:paddingRight="20dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="32dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="14dp"
+        android:paddingRight="14dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp">
 
-        <!-- 顶部标题 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="设置"
-            android:textColor="@color/ink"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="4dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="服务器连接与设备自检配置"
-            android:textColor="@color/muted"
-            android:textSize="13sp"
-            android:layout_marginBottom="18dp" />
-
-        <!-- 设备 ID 卡片 -->
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="@drawable/bg_device_id"
-            android:padding="18dp"
-            android:layout_marginBottom="16dp">
-
+            android:gravity="center"
+            android:orientation="vertical">
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="设备 ID"
-                android:textColor="#C9D4FF"
-                android:textSize="12sp"
-                android:letterSpacing="0.08" />
-
-            <TextView
-                android:id="@+id/deviceIdView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:text="万象"
                 android:textColor="@color/white"
-                android:textSize="15sp"
-                android:typeface="monospace"
-                android:textIsSelectable="true"
-                tools:text="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="管理后台将据此识别并管理本设备"
-                android:textColor="#A9BAFF"
-                android:textSize="12sp" />
+                android:textSize="12.5sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.06" />
         </LinearLayout>
 
-        <!-- Web 服务器卡片 -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="18dp"
-            android:layout_marginBottom="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="6dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Web 服务器"
-                    android:textColor="@color/ink"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="HTTP API"
-                    android:textColor="@color/brand"
-                    android:textSize="11sp"
-                    android:background="@color/brand_light"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:paddingTop="3dp"
-                    android:paddingBottom="3dp" />
-            </LinearLayout>
-
+            android:layout_marginLeft="10dp"
+            android:layout_marginRight="8dp">
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="14dp"
-                android:text="用于换取 WebSocket 连接票据"
+                android:text="连接与自检设置"
+                android:textColor="@color/ink"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="服务器通道配置 · 权限健康度检查"
                 android:textColor="@color/muted"
-                android:textSize="12sp" />
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/webHostLayout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="服务器地址"
-                app:boxStrokeColor="@color/brand"
-                app:hintTextColor="@color/brand"
-                android:layout_marginBottom="12dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/webHostInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="text"
-                    android:textSize="15sp"
-                    android:textColor="@color/ink" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/webPortLayout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="端口"
-                app:boxStrokeColor="@color/brand"
-                app:hintTextColor="@color/brand">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/webPortInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="number"
-                    android:textSize="15sp"
-                    android:textColor="@color/ink" />
-            </com.google.android.material.textfield.TextInputLayout>
+                android:textSize="11.5sp"
+                android:singleLine="true"
+                android:ellipsize="end" />
         </LinearLayout>
 
-        <!-- WebSocket 服务器卡片 -->
+        <!-- 右侧实时连接状态胶囊（真实 6dp 小圆点 View） -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:id="@+id/statusBadge"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="18dp"
-            android:layout_marginBottom="20dp">
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_pill_danger"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="6dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="WebSocket 服务器"
-                    android:textColor="@color/ink"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="实时通道"
-                    android:textColor="@color/success"
-                    android:textSize="11sp"
-                    android:background="@color/success_soft"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:paddingTop="3dp"
-                    android:paddingBottom="3dp" />
-            </LinearLayout>
+            <View
+                android:id="@+id/statusDot"
+                android:layout_width="6dp"
+                android:layout_height="6dp"
+                android:background="@drawable/bg_dot_danger" />
 
             <TextView
+                android:id="@+id/statusView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="14dp"
-                android:text="用于接收心跳与设备控制指令"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/wsHostLayout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="服务器地址"
-                app:boxStrokeColor="@color/brand"
-                app:hintTextColor="@color/brand"
-                android:layout_marginBottom="12dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/wsHostInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="text"
-                    android:textSize="15sp"
-                    android:textColor="@color/ink" />
-            </com.google.android.material.textfield.TextInputLayout>
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/wsPortLayout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="端口"
-                app:boxStrokeColor="@color/brand"
-                app:hintTextColor="@color/brand">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/wsPortInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="number"
-                    android:textSize="15sp"
-                    android:textColor="@color/ink" />
-            </com.google.android.material.textfield.TextInputLayout>
+                android:layout_marginLeft="5dp"
+                android:text="未连接"
+                android:textColor="@color/danger"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
         </LinearLayout>
-
-        <!-- 无线调试自动恢复状态 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="18dp"
-            android:layout_marginBottom="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="6dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="无线调试自动恢复"
-                    android:textColor="@color/ink"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="自检"
-                    android:textColor="@color/brand"
-                    android:textSize="11sp"
-                    android:background="@color/brand_light"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:paddingTop="3dp"
-                    android:paddingBottom="3dp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/adbRecoverStatusView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="未检测"
-                android:textColor="@color/ink_2"
-                android:textSize="13sp"
-                android:layout_marginBottom="12dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/testAdbRecoverButton"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:text="测试：触发一次自动配对"
-                android:textSize="14sp"
-                app:cornerRadius="12dp"
-                app:strokeColor="@color/brand"
-                android:textColor="@color/brand" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/pullScriptButton"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:layout_marginTop="10dp"
-                android:text="立即拉取机型脚本"
-                android:textSize="14sp"
-                app:cornerRadius="12dp"
-                app:strokeColor="@color/brand"
-                android:textColor="@color/brand" />
-        </LinearLayout>
-
-        <!-- 状态提示 -->
-        <TextView
-            android:id="@+id/statusView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="14dp"
-            android:text="未连接，点击下方「连接」开始"
-            android:textColor="@color/ink_2"
-            android:textSize="13sp"
-            android:background="@drawable/bg_status"
-            android:layout_marginBottom="16dp" />
-
-        <!-- 连接 / 断开按钮 -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/connectButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:text="连接"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/white"
-            app:cornerRadius="14dp"
-            app:backgroundTint="@color/brand" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/disconnectButton"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="10dp"
-            android:text="断开连接"
-            android:textSize="15sp"
-            android:enabled="false"
-            app:cornerRadius="14dp"
-            app:strokeColor="@color/danger"
-            android:textColor="@color/danger" />
-
     </LinearLayout>
-</ScrollView>
+
+    <!-- 可滚动内容区 -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="16dp">
+
+            <!-- 2. 设备唯一标识 (Device ID) 渐变卡片 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_device_id"
+                android:padding="14dp"
+                android:layout_marginBottom="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="设备唯一标识 (Device ID)"
+                        android:textColor="#C9D4FF"
+                        android:textSize="11.5sp" />
+
+                    <TextView
+                        android:id="@+id/copyDeviceIdBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_glass"
+                        android:paddingLeft="10dp"
+                        android:paddingRight="10dp"
+                        android:paddingTop="3dp"
+                        android:paddingBottom="3dp"
+                        android:text="复制 ID"
+                        android:textColor="@color/white"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/deviceIdView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:typeface="monospace"
+                    android:textIsSelectable="true"
+                    android:singleLine="true"
+                    android:ellipsize="middle"
+                    tools:text="d9f68df8-6630-3715-a491-695e427f112b" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="6dp"
+                    android:background="#26FFFFFF" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/deviceModelView"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="机型：Android"
+                        android:textColor="#E0E7FF"
+                        android:textSize="11sp"
+                        android:singleLine="true"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="硬件绑定 · 重装不变"
+                        android:textColor="#C9D4FF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 3. 服务器连接配置卡片（V2 柔和浅灰底输入框 + 严格互斥双按钮） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="14dp"
+                android:layout_marginBottom="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="9dp">
+
+                    <View
+                        android:layout_width="4dp"
+                        android:layout_height="14dp"
+                        android:background="@drawable/bg_brand_bar" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="8dp"
+                        android:text="服务器连接配置"
+                        android:textColor="@color/ink"
+                        android:textSize="13.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="已连接时自动锁定输入"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <!-- 第一行：Web 票据地址 (HTTP) (2/3) + 端口 (1/3) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:baselineAligned="false"
+                    android:layout_marginBottom="8dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="2"
+                        android:layout_marginRight="8dp"
+                        android:orientation="vertical"
+                        android:background="@drawable/bg_input_box"
+                        android:paddingLeft="11dp"
+                        android:paddingRight="11dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Web 票据地址 (HTTP)"
+                                android:textColor="@color/muted"
+                                android:textSize="10.5sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="API"
+                                android:textColor="@color/brand"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/webHostInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:background="@null"
+                            android:padding="0dp"
+                            android:inputType="text"
+                            android:singleLine="true"
+                            android:typeface="monospace"
+                            android:textStyle="bold"
+                            android:textSize="13sp"
+                            android:textColor="@color/ink"
+                            android:hint="如 192.168.90.30" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:background="@drawable/bg_input_box"
+                        android:paddingLeft="11dp"
+                        android:paddingRight="11dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="端口"
+                            android:textColor="@color/muted"
+                            android:textSize="10.5sp" />
+
+                        <EditText
+                            android:id="@+id/webPortInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:background="@null"
+                            android:padding="0dp"
+                            android:inputType="number"
+                            android:singleLine="true"
+                            android:typeface="monospace"
+                            android:textStyle="bold"
+                            android:textSize="13sp"
+                            android:textColor="@color/ink"
+                            android:hint="9001" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 第二行：实时通道地址 (WebSocket) (2/3) + 端口 (1/3) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:baselineAligned="false"
+                    android:layout_marginBottom="10dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="2"
+                        android:layout_marginRight="8dp"
+                        android:orientation="vertical"
+                        android:background="@drawable/bg_input_box"
+                        android:paddingLeft="11dp"
+                        android:paddingRight="11dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="实时通道地址 (WebSocket)"
+                                android:textColor="@color/muted"
+                                android:textSize="10.5sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="WS"
+                                android:textColor="@color/success"
+                                android:textSize="10sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/wsHostInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:background="@null"
+                            android:padding="0dp"
+                            android:inputType="text"
+                            android:singleLine="true"
+                            android:typeface="monospace"
+                            android:textStyle="bold"
+                            android:textSize="13sp"
+                            android:textColor="@color/ink"
+                            android:hint="如 192.168.90.30" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:background="@drawable/bg_input_box"
+                        android:paddingLeft="11dp"
+                        android:paddingRight="11dp"
+                        android:paddingTop="6dp"
+                        android:paddingBottom="6dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="端口"
+                            android:textColor="@color/muted"
+                            android:textSize="10.5sp" />
+
+                        <EditText
+                            android:id="@+id/wsPortInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:background="@null"
+                            android:padding="0dp"
+                            android:inputType="number"
+                            android:singleLine="true"
+                            android:typeface="monospace"
+                            android:textStyle="bold"
+                            android:textSize="13sp"
+                            android:textColor="@color/ink"
+                            android:hint="9003" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 严格互斥按钮：已连接时左灰右红；未连接时左蓝右灰 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/connectButton"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginRight="6dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="保存并连接"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/white"
+                        app:cornerRadius="12dp"
+                        app:elevation="0dp"
+                        app:backgroundTint="@color/brand" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/disconnectButton"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="6dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="断开连接"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:enabled="false"
+                        app:cornerRadius="12dp"
+                        app:elevation="0dp"
+                        app:backgroundTint="#E4E7EC"
+                        android:textColor="#98A2B3" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 4. 无线调试与权限自检（精致小胶囊 + 真实 6dp 圆点 View，彻底告别粗大字符 ●） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="6dp">
+
+                    <View
+                        android:layout_width="4dp"
+                        android:layout_height="14dp"
+                        android:background="@drawable/bg_brand_bar" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="8dp"
+                        android:text="无线调试与权限自检"
+                        android:textColor="@color/ink"
+                        android:textSize="13.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/recoverModePill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="静默秒开模式"
+                        android:textColor="@color/brand"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_pill_brand"
+                        android:paddingLeft="9dp"
+                        android:paddingRight="9dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp" />
+                </LinearLayout>
+
+                <!-- 检查项 1：ADB 5555 端口状态 -->
+                <LinearLayout
+                    android:id="@+id/rowCheckAdb5555"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="ADB 5555 端口状态"
+                        android:textColor="@color/ink_2"
+                        android:textSize="12.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/checkAdb5555Pill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/bg_pill_success"
+                        android:paddingLeft="9dp"
+                        android:paddingRight="9dp"
+                        android:paddingTop="3dp"
+                        android:paddingBottom="3dp">
+
+                        <View
+                            android:id="@+id/checkAdb5555Dot"
+                            android:layout_width="6dp"
+                            android:layout_height="6dp"
+                            android:background="@drawable/bg_dot_success" />
+
+                        <TextView
+                            android:id="@+id/checkAdb5555View"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="5dp"
+                            android:text="监听中 (:5555)"
+                            android:textColor="@color/success"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#F2F4F7" />
+
+                <!-- 检查项 2：后台静默秒开权限 -->
+                <LinearLayout
+                    android:id="@+id/rowCheckSilentPerm"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="后台静默秒开权限"
+                        android:textColor="@color/ink_2"
+                        android:textSize="12.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/checkSilentPermPill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/bg_pill_success"
+                        android:paddingLeft="9dp"
+                        android:paddingRight="9dp"
+                        android:paddingTop="3dp"
+                        android:paddingBottom="3dp">
+
+                        <View
+                            android:id="@+id/checkSilentPermDot"
+                            android:layout_width="6dp"
+                            android:layout_height="6dp"
+                            android:background="@drawable/bg_dot_success" />
+
+                        <TextView
+                            android:id="@+id/checkSilentPermView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="5dp"
+                            android:text="已永久授权"
+                            android:textColor="@color/success"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#F2F4F7" />
+
+                <!-- 检查项 3：无障碍辅助服务 -->
+                <LinearLayout
+                    android:id="@+id/rowCheckAccessibility"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="无障碍辅助服务"
+                        android:textColor="@color/ink_2"
+                        android:textSize="12.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/checkAccessibilityPill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/bg_pill_success"
+                        android:paddingLeft="9dp"
+                        android:paddingRight="9dp"
+                        android:paddingTop="3dp"
+                        android:paddingBottom="3dp">
+
+                        <View
+                            android:id="@+id/checkAccessibilityDot"
+                            android:layout_width="6dp"
+                            android:layout_height="6dp"
+                            android:background="@drawable/bg_dot_success" />
+
+                        <TextView
+                            android:id="@+id/checkAccessibilityView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="5dp"
+                            android:text="已开启"
+                            android:textColor="@color/success"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#F2F4F7" />
+
+                <!-- 检查项 4：后台省电白名单 -->
+                <LinearLayout
+                    android:id="@+id/rowCheckBattery"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="后台省电白名单"
+                        android:textColor="@color/ink_2"
+                        android:textSize="12.5sp" />
+
+                    <LinearLayout
+                        android:id="@+id/checkBatteryPill"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/bg_pill_success"
+                        android:paddingLeft="9dp"
+                        android:paddingRight="9dp"
+                        android:paddingTop="3dp"
+                        android:paddingBottom="3dp">
+
+                        <View
+                            android:id="@+id/checkBatteryDot"
+                            android:layout_width="6dp"
+                            android:layout_height="6dp"
+                            android:background="@drawable/bg_dot_success" />
+
+                        <TextView
+                            android:id="@+id/checkBatteryView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="5dp"
+                            android:text="已加入"
+                            android:textColor="@color/success"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 动态执行反馈小字（隐藏在默认态，触发恢复时展示） -->
+                <TextView
+                    android:id="@+id/adbRecoverStatusView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="开机或掉线时将自动静默开启 5555 端口并上报"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+
+                <!-- 底部操作按钮并排（V2 柔和浅蓝底胶囊按钮） -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/testAdbRecoverButton"
+                        android:layout_width="0dp"
+                        android:layout_height="38dp"
+                        android:layout_weight="1"
+                        android:layout_marginRight="6dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="触发 5555 自恢复"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="11dp"
+                        app:elevation="0dp"
+                        app:backgroundTint="@color/brand_light"
+                        android:textColor="@color/brand" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/pullScriptButton"
+                        android:layout_width="0dp"
+                        android:layout_height="38dp"
+                        android:layout_weight="1"
+                        android:layout_marginLeft="6dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="拉取机型脚本"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="11dp"
+                        app:elevation="0dp"
+                        app:backgroundTint="@color/brand_light"
+                        android:textColor="@color/brand" />
+                </LinearLayout>
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

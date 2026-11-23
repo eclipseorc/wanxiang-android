@@ -13,12 +13,21 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <!-- 底部导航：主页 / 设置 -->
+    <!-- 底栏顶部分割线：消除与页面背景的断层 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/line" />
+
+    <!-- 纯白底部导航：关闭 Material3 默认紫色 surfaceTint (elevation=0dp) -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="58dp"
         android:background="@color/surface"
+        app:elevation="0dp"
+        app:itemActiveIndicatorStyle="@null"
+        app:itemIconSize="20dp"
         app:itemIconTint="@color/bottom_nav_tint"
         app:itemTextColor="@color/bottom_nav_tint"
         app:labelVisibilityMode="labeled"

@@ -1,11 +1,15 @@
 package com.wanxiang.client;
 
-import android.app.Activity;
+import android.Manifest;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,22 +20,24 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.snackbar.Snackbar;
 
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * 设置页：配置服务器地址，启动/停止连接保活服务，以及无线调试自检。
- *
- * <p>真正的 WebSocket 长连接运行在 {@link ConnectionForegroundService} 前台服务中，
- * 本 Fragment 只负责 UI 与配置。</p>
+ * 设置页（V2）：与主页对齐的顶部状态栏、设备唯一标识卡片、浅灰输入框服务器配置、圆角胶囊权限自检清单。
  */
 public class SettingsFragment extends Fragment {
 
@@ -47,27 +53,49 @@ public class SettingsFragment extends Fragment {
     private EditText wsHostInput;
     private EditText wsPortInput;
     private TextView deviceIdView;
+    private TextView deviceModelView;
+    private LinearLayout statusBadge;
+    private View statusDot;
     private TextView statusView;
     private TextView adbRecoverStatusView;
+    private TextView recoverModePill;
+
+    private LinearLayout checkAdb5555Pill;
+    private View checkAdb5555Dot;
+    private TextView checkAdb5555View;
+
+    private LinearLayout checkSilentPermPill;
+    private View checkSilentPermDot;
+    private TextView checkSilentPermView;
+
+    private LinearLayout checkAccessibilityPill;
+    private View checkAccessibilityDot;
+    private TextView checkAccessibilityView;
+
+    private LinearLayout checkBatteryPill;
+    private View checkBatteryDot;
+    private TextView checkBatteryView;
+
     private MaterialButton connectButton;
     private MaterialButton disconnectButton;
     private MaterialButton testAdbRecoverButton;
     private MaterialButton pullScriptButton;
 
     private String deviceId;
+    private final ExecutorService checkExecutor = Executors.newSingleThreadExecutor();
 
-    // 接收服务广播的连接状态。
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String state = intent.getStringExtra(ConnectionForegroundService.EXTRA_STATE);
             if ("online".equals(state)) {
                 setConnected(true);
-                setStatus("设备已连接，正在周期上报心跳");
+                setStatus("心跳正常");
             } else if ("offline".equals(state)) {
                 setConnected(false);
-                setStatus("连接已断开，正在尝试重连…");
+                setStatus("未连接");
             }
+            refreshAdbRecoverStatus();
         }
     };
 
@@ -85,8 +113,15 @@ public class SettingsFragment extends Fragment {
         bindViews(view);
         applySavedConfig();
         deviceIdView.setText(deviceId);
-        setupButtons();
-        setStatus("未连接，点击下方「连接」开始");
+        if (deviceModelView != null) {
+            String manufacturer = Build.MANUFACTURER != null ? Build.MANUFACTURER : "";
+            String model = Build.MODEL != null ? Build.MODEL : "Android";
+            deviceModelView.setText("机型：" + (manufacturer + " " + model).trim());
+        }
+        setupButtons(view);
+        boolean online = ConnectionForegroundService.isConnected();
+        setConnected(online);
+        setStatus(online ? "心跳正常" : "未连接");
         checkAutoSetup();
         refreshAdbRecoverStatus();
     }
@@ -100,6 +135,27 @@ public class SettingsFragment extends Fragment {
         } else {
             requireContext().registerReceiver(stateReceiver, filter);
         }
+        boolean online = ConnectionForegroundService.isConnected();
+        setConnected(online);
+        setStatus(online ? "心跳正常" : "未连接");
+        refreshAdbRecoverStatus();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshAdbRecoverStatus();
+    }
+
+    @Override
+    public void onHiddenChanged(boolean hidden) {
+        super.onHiddenChanged(hidden);
+        if (!hidden && isAdded()) {
+            boolean online = ConnectionForegroundService.isConnected();
+            setConnected(online);
+            setStatus(online ? "心跳正常" : "未连接");
+            refreshAdbRecoverStatus();
+        }
     }
 
     @Override
@@ -107,7 +163,6 @@ public class SettingsFragment extends Fragment {
         try {
             requireContext().unregisterReceiver(stateReceiver);
         } catch (IllegalArgumentException ignored) {
-            // 极端生命周期下 receiver 未注册，忽略。
         }
         super.onStop();
     }
@@ -118,8 +173,29 @@ public class SettingsFragment extends Fragment {
         wsHostInput = root.findViewById(R.id.wsHostInput);
         wsPortInput = root.findViewById(R.id.wsPortInput);
         deviceIdView = root.findViewById(R.id.deviceIdView);
+        deviceModelView = root.findViewById(R.id.deviceModelView);
+        statusBadge = root.findViewById(R.id.statusBadge);
+        statusDot = root.findViewById(R.id.statusDot);
         statusView = root.findViewById(R.id.statusView);
         adbRecoverStatusView = root.findViewById(R.id.adbRecoverStatusView);
+        recoverModePill = root.findViewById(R.id.recoverModePill);
+
+        checkAdb5555Pill = root.findViewById(R.id.checkAdb5555Pill);
+        checkAdb5555Dot = root.findViewById(R.id.checkAdb5555Dot);
+        checkAdb5555View = root.findViewById(R.id.checkAdb5555View);
+
+        checkSilentPermPill = root.findViewById(R.id.checkSilentPermPill);
+        checkSilentPermDot = root.findViewById(R.id.checkSilentPermDot);
+        checkSilentPermView = root.findViewById(R.id.checkSilentPermView);
+
+        checkAccessibilityPill = root.findViewById(R.id.checkAccessibilityPill);
+        checkAccessibilityDot = root.findViewById(R.id.checkAccessibilityDot);
+        checkAccessibilityView = root.findViewById(R.id.checkAccessibilityView);
+
+        checkBatteryPill = root.findViewById(R.id.checkBatteryPill);
+        checkBatteryDot = root.findViewById(R.id.checkBatteryDot);
+        checkBatteryView = root.findViewById(R.id.checkBatteryView);
+
         connectButton = root.findViewById(R.id.connectButton);
         disconnectButton = root.findViewById(R.id.disconnectButton);
         testAdbRecoverButton = root.findViewById(R.id.testAdbRecoverButton);
@@ -133,30 +209,53 @@ public class SettingsFragment extends Fragment {
         wsPortInput.setText(prefs().getString(KEY_WS_PORT, "9003"));
     }
 
-    private void setupButtons() {
+    private void setupButtons(View root) {
         connectButton.setOnClickListener(v -> startConnection());
         disconnectButton.setOnClickListener(v -> stopConnection());
         testAdbRecoverButton.setOnClickListener(v -> testAdbRecover());
         pullScriptButton.setOnClickListener(v -> pullScript());
+
+        View copyIdBtn = root.findViewById(R.id.copyDeviceIdBtn);
+        if (copyIdBtn != null) {
+            copyIdBtn.setOnClickListener(v -> {
+                ClipboardManager cm = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null && deviceId != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("device_id", deviceId));
+                    Toast.makeText(requireContext(), "已复制设备 ID: " + deviceId, Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        View rowAdb = root.findViewById(R.id.rowCheckAdb5555);
+        if (rowAdb != null) {
+            rowAdb.setOnClickListener(v -> testAdbRecover());
+        }
+        View rowAcc = root.findViewById(R.id.rowCheckAccessibility);
+        if (rowAcc != null) {
+            rowAcc.setOnClickListener(v -> openAccessibilitySettings());
+        }
+        View rowBat = root.findViewById(R.id.rowCheckBattery);
+        if (rowBat != null) {
+            rowBat.setOnClickListener(v -> requestIgnoreBatteryOptimizations());
+        }
     }
 
-    // pullScript 发送应用内广播，让前台服务立即向服务端拉取一次机型脚本。
-    // 这样管理员在后台加了脚本后，无需等设备重连即可立即拉取并缓存。
     private void pullScript() {
-        DebugConsole.info("SCRIPT", "用户点击「立即拉取机型脚本」");
+        DebugConsole.info("SCRIPT", "用户点击「拉取机型脚本」");
         Intent intent = new Intent(ConnectionForegroundService.ACTION_PULL_SCRIPT);
         intent.setPackage(requireContext().getPackageName());
         requireContext().sendBroadcast(intent);
-        Snackbar.make(requireView(), "已发送拉取请求，请查看主页 Console 日志确认结果", Snackbar.LENGTH_LONG).show();
+        Snackbar.make(requireView(), "已发送拉取请求，请查看主页运行日志确认结果", Snackbar.LENGTH_LONG).show();
     }
 
-    // testAdbRecover 手动触发一次本地 ADB 5555 恢复：优先走 WRITE_SECURE_SETTINGS 后台静默秒开通道，
-    // 若尚未完成首次配对或未获授权，再自动回退到无障碍界面配对流程。
     private void testAdbRecover() {
         final Context appCtx = requireContext().getApplicationContext();
         DebugConsole.info("ADB", "手动触发 5555 端口恢复任务（优先尝试后台静默开启）");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            adbRecoverStatusView.setText("正在后台静默开启无线调试并固化 5555 端口…");
+            if (adbRecoverStatusView != null) {
+                adbRecoverStatusView.setVisibility(View.VISIBLE);
+                adbRecoverStatusView.setText("正在后台静默开启无线调试并固化 5555 端口…");
+            }
             LocalAdbManager.trySilentSwitchTo5555(appCtx, new LocalAdbManager.Callback() {
                 @Override
                 public void onSuccess() {
@@ -164,8 +263,9 @@ public class SettingsFragment extends Fragment {
                     DebugConsole.success("ADB", "后台静默开启并固化 5555 端口成功（无需打开设置界面）");
                     if (isAdded() && adbRecoverStatusView != null) {
                         adbRecoverStatusView.post(() -> {
+                            adbRecoverStatusView.setVisibility(View.VISIBLE);
                             adbRecoverStatusView.setText("后台静默开启 5555 端口成功，已通知服务端连接！");
-                            adbRecoverStatusView.postDelayed(SettingsFragment.this::refreshAdbRecoverStatus, 3000L);
+                            refreshAdbRecoverStatus();
                         });
                     }
                 }
@@ -195,13 +295,17 @@ public class SettingsFragment extends Fragment {
             return;
         }
         AutoAdbAccessibilityService.startAutoPairTask(requireContext());
-        adbRecoverStatusView.setText("已触发首次无障碍配对，完成后将自动固化 5555 并开启后续后台静默恢复…");
-        adbRecoverStatusView.postDelayed(this::refreshAdbRecoverStatus, 3000L);
+        if (adbRecoverStatusView != null) {
+            adbRecoverStatusView.setVisibility(View.VISIBLE);
+            adbRecoverStatusView.setText("已触发首次无障碍配对，完成后将自动固化 5555 并开启后续后台静默恢复…");
+            adbRecoverStatusView.postDelayed(this::refreshAdbRecoverStatus, 3000L);
+        }
     }
 
-    // checkAutoSetup 检测「开机自动恢复远程控制」所需的一次性初始化是否完成。
     private void checkAutoSetup() {
-        if (isAccessibilityEnabled()) {
+        boolean hasSilentPerm = ContextCompat.checkSelfPermission(
+                requireContext(), Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+        if (hasSilentPerm || isAccessibilityEnabled()) {
             return;
         }
         Snackbar.make(requireView(),
@@ -211,7 +315,6 @@ public class SettingsFragment extends Fragment {
                 .show();
     }
 
-    // isAccessibilityEnabled 检测本无障碍服务是否已在系统设置中开启。
     private boolean isAccessibilityEnabled() {
         AccessibilityManager am = (AccessibilityManager) requireContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
         if (am == null) {
@@ -231,13 +334,69 @@ public class SettingsFragment extends Fragment {
         return false;
     }
 
-    // refreshAdbRecoverStatus 刷新自配对状态提示。
-    private void refreshAdbRecoverStatus() {
-        adbRecoverStatusView.setText("已启用本地自配对：开机后自动进开发者选项点「无线调试」开关、"
-                + "读配对码并本地配对、固化 5555 端口。点击下方按钮可手动触发一次。");
+    private boolean isBatteryOptimizationIgnored() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true;
+        }
+        PowerManager pm = (PowerManager) requireContext().getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(requireContext().getPackageName());
     }
 
-    // openAccessibilitySettings 跳转系统无障碍设置页。
+    private void applyCheckPill(LinearLayout pill, View dot, TextView text, boolean ok, String okLabel, String warnLabel) {
+        if (pill == null || dot == null || text == null || !isAdded()) {
+            return;
+        }
+        Context ctx = requireContext();
+        if (ok) {
+            pill.setBackgroundResource(R.drawable.bg_pill_success);
+            dot.setBackgroundResource(R.drawable.bg_dot_success);
+            text.setText(okLabel);
+            text.setTextColor(ctx.getColor(R.color.success));
+        } else {
+            pill.setBackgroundResource(R.drawable.bg_pill_warning);
+            dot.setBackgroundResource(R.drawable.bg_dot_warning);
+            text.setText(warnLabel);
+            text.setTextColor(ctx.getColor(R.color.warning));
+        }
+    }
+
+    /** 刷新 4 项无线调试与权限自检胶囊状态。 */
+    private void refreshAdbRecoverStatus() {
+        if (!isAdded()) {
+            return;
+        }
+        final Context ctx = requireContext();
+        final boolean hasSilentPerm = ContextCompat.checkSelfPermission(
+                ctx, Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+        final boolean accEnabled = isAccessibilityEnabled();
+        final boolean batIgnored = isBatteryOptimizationIgnored();
+
+        applyCheckPill(checkSilentPermPill, checkSilentPermDot, checkSilentPermView,
+                hasSilentPerm, "已永久授权", "首次配对授权");
+        applyCheckPill(checkAccessibilityPill, checkAccessibilityDot, checkAccessibilityView,
+                accEnabled, "已开启", "去开启 >");
+        applyCheckPill(checkBatteryPill, checkBatteryDot, checkBatteryView,
+                batIgnored, "已加入", "去设置 >");
+
+        if (recoverModePill != null) {
+            recoverModePill.setText(hasSilentPerm ? "静默秒开模式" : "全自动模式");
+        }
+
+        checkExecutor.execute(() -> {
+            final boolean listening5555 = LocalAdbManager.isLocalPortListening(5555);
+            if (!isAdded() || getActivity() == null) {
+                return;
+            }
+            getActivity().runOnUiThread(() -> {
+                if (!isAdded()) {
+                    return;
+                }
+                applyCheckPill(checkAdb5555Pill, checkAdb5555Dot, checkAdb5555View,
+                        listening5555, "监听中 (:5555)", "点击激活");
+            });
+        });
+    }
+
     private void openAccessibilitySettings() {
         try {
             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
@@ -258,7 +417,7 @@ public class SettingsFragment extends Fragment {
         String wsPort = wsPortInput.getText().toString().trim();
 
         if (webHost.isEmpty() || webPort.isEmpty() || wsHost.isEmpty() || wsPort.isEmpty()) {
-            setStatus("请填写完整的服务器地址和端口");
+            setStatus("参数未填全");
             return;
         }
 
@@ -278,7 +437,7 @@ public class SettingsFragment extends Fragment {
         }
 
         DebugConsole.info("CONN", "发起连接：web=" + webHost + ":" + webPort + " ws=" + wsHost + ":" + wsPort);
-        setStatus("正在连接服务器…");
+        setStatus("连接中…");
         maybeRequestIgnoreBatteryOptimizations();
     }
 
@@ -286,18 +445,13 @@ public class SettingsFragment extends Fragment {
         Intent intent = new Intent(requireContext(), ConnectionForegroundService.class);
         intent.setAction(ConnectionForegroundService.ACTION_STOP);
         requireContext().startService(intent);
-        setStatus("已主动断开设备连接");
+        setStatus("未连接");
         setConnected(false);
         DebugConsole.info("CONN", "已主动断开连接");
     }
 
-    // maybeRequestIgnoreBatteryOptimizations 引导用户把 App 加入省电白名单。
     private void maybeRequestIgnoreBatteryOptimizations() {
-        PowerManager pm = (PowerManager) requireContext().getSystemService(Context.POWER_SERVICE);
-        if (pm == null) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !pm.isIgnoringBatteryOptimizations(requireContext().getPackageName())) {
+        if (!isBatteryOptimizationIgnored()) {
             Snackbar.make(requireView(),
                             "建议允许后台运行，避免锁屏后掉线",
                             Snackbar.LENGTH_INDEFINITE)
@@ -327,12 +481,6 @@ public class SettingsFragment extends Fragment {
         return getOrCreateDeviceId(requireContext());
     }
 
-    /**
-     * 获取本机幂等 deviceId：
-     * 优先基于 Settings.Secure.ANDROID_ID 派生确定性 UUID（同一台物理手机卸载重装、清除数据后
-     * 依然生成完全相同的 deviceId，不会在管理后台产生重复离线设备）；仅当 ANDROID_ID 不可用时
-     * 回退到 SharedPreferences 随机 UUID。
-     */
     public static String getOrCreateDeviceId(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         try {
@@ -367,22 +515,60 @@ public class SettingsFragment extends Fragment {
     }
 
     private void setConnected(boolean connected) {
+        if (!isAdded() || connectButton == null || disconnectButton == null) {
+            return;
+        }
         connectButton.setEnabled(!connected);
         disconnectButton.setEnabled(connected);
+
+        if (webHostInput != null) webHostInput.setEnabled(!connected);
+        if (webPortInput != null) webPortInput.setEnabled(!connected);
+        if (wsHostInput != null) wsHostInput.setEnabled(!connected);
+        if (wsPortInput != null) wsPortInput.setEnabled(!connected);
+
+        int brandColor = requireContext().getColor(R.color.brand);
+        int dangerColor = requireContext().getColor(R.color.danger);
+        int disabledBg = 0xFFE4E7EC;
+        int disabledText = 0xFF98A2B3;
+
+        if (connected) {
+            // 已连接状态：「已连接」浅灰禁用，「断开连接」红底白字激活
+            connectButton.setText("已连接");
+            connectButton.setBackgroundTintList(ColorStateList.valueOf(disabledBg));
+            connectButton.setTextColor(disabledText);
+
+            disconnectButton.setText("断开连接");
+            disconnectButton.setBackgroundTintList(ColorStateList.valueOf(dangerColor));
+            disconnectButton.setTextColor(0xFFFFFFFF);
+        } else {
+            // 未连接状态：「保存并连接」品牌蓝激活，「断开连接」浅灰禁用
+            connectButton.setText("保存并连接");
+            connectButton.setBackgroundTintList(ColorStateList.valueOf(brandColor));
+            connectButton.setTextColor(0xFFFFFFFF);
+
+            disconnectButton.setText("断开连接");
+            disconnectButton.setBackgroundTintList(ColorStateList.valueOf(disabledBg));
+            disconnectButton.setTextColor(disabledText);
+        }
     }
 
     private void setStatus(String text) {
-        statusView.setText(text);
-        int color;
-        if (text.contains("已连接") || text.contains("接入")) {
-            color = requireContext().getColor(R.color.success);
-        } else if (text.contains("失败") || text.contains("断开")) {
-            color = requireContext().getColor(R.color.danger);
-        } else if (text.contains("重连") || text.contains("连接服务器")) {
-            color = requireContext().getColor(R.color.warning);
-        } else {
-            color = requireContext().getColor(R.color.ink_2);
+        if (!isAdded() || statusView == null) {
+            return;
         }
-        statusView.setTextColor(color);
+        statusView.setText(text);
+        if (text.contains("正常") || text.contains("已连接") || text.contains("接入")) {
+            if (statusBadge != null) statusBadge.setBackgroundResource(R.drawable.bg_pill_success);
+            if (statusDot != null) statusDot.setBackgroundResource(R.drawable.bg_dot_success);
+            statusView.setTextColor(requireContext().getColor(R.color.success));
+        } else if (text.contains("连接中") || text.contains("重连")) {
+            if (statusBadge != null) statusBadge.setBackgroundResource(R.drawable.bg_pill_brand);
+            if (statusDot != null) statusDot.setBackgroundResource(R.drawable.bg_dot_warning);
+            statusView.setTextColor(requireContext().getColor(R.color.brand));
+        } else {
+            if (statusBadge != null) statusBadge.setBackgroundResource(R.drawable.bg_pill_danger);
+            if (statusDot != null) statusDot.setBackgroundResource(R.drawable.bg_dot_danger);
+            statusView.setTextColor(requireContext().getColor(R.color.danger));
+        }
     }
 }

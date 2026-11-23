@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V2 浅色终端顶栏「复制 / 清空」描边小按钮 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="8dp" />
+    <stroke android:width="1dp" android:color="#E2E8F0" />
+</shape>

@@ -139,4 +139,9 @@ public final class DebugConsole {
     public static synchronized List<Entry> snapshot() {
         return new ArrayList<>(entries);
     }
+
+    /** 清空全部日志缓存。 */
+    public static synchronized void clear() {
+        entries.clear();
+    }
 }

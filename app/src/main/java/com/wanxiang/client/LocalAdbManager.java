@@ -89,7 +89,7 @@ public class LocalAdbManager {
     }
 
     /** 检测本机指定 TCP 端口是否已处于监听状态（不发起 ADB 认证握手，避免触发多余的 RSA 授权弹窗）。 */
-    private static boolean isLocalPortListening(int port) {
+    public static boolean isLocalPortListening(int port) {
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress("127.0.0.1", port), 800);
             return true;
