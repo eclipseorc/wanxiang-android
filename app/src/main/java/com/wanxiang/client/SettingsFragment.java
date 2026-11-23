@@ -250,6 +250,19 @@ public class SettingsFragment extends Fragment {
 
     private void testAdbRecover() {
         final Context appCtx = requireContext().getApplicationContext();
+        if (!AutoAdbAccessibilityService.isDeveloperOptionsEnabled(appCtx)) {
+            DebugConsole.warn("ADB", "检测到系统尚未开启「开发者选项」，已中止自动配对");
+            if (adbRecoverStatusView != null) {
+                adbRecoverStatusView.setVisibility(View.VISIBLE);
+                adbRecoverStatusView.setText("请先开启「开发者选项」后再点击触发 5555 自恢复");
+            }
+            Snackbar.make(requireView(),
+                            "请先开启「开发者选项」（设置 → 关于手机 → 连续点击版本号）",
+                            Snackbar.LENGTH_LONG)
+                    .setAction("去开启", v -> openDeviceInfoSettings())
+                    .show();
+            return;
+        }
         DebugConsole.info("ADB", "手动触发 5555 端口恢复任务（优先尝试后台静默开启）");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (adbRecoverStatusView != null) {
@@ -395,6 +408,17 @@ public class SettingsFragment extends Fragment {
                         listening5555, "监听中 (:5555)", "点击激活");
             });
         });
+    }
+
+    private void openDeviceInfoSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS));
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_SETTINGS));
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void openAccessibilitySettings() {

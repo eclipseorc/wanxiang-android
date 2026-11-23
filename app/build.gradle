@@ -13,6 +13,13 @@ android {
         versionCode 1
         versionName '0.1.0'
     }
+
+    // 兼容 Android Studio 内置 JDK 25：AGP 8.7.3 的 Lint 解析器尚不支持 25.0.4 版本号，
+    // 关闭 Release 构建时的 lintVital 检查以避免打包失败。
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
 }
 
 dependencies {

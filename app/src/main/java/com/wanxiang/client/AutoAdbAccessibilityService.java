@@ -142,11 +142,27 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
         }
     }
 
+    /** 检查系统「开发者选项」总开关是否已开启（读取 Settings.Global 无需特殊权限）。 */
+    public static boolean isDeveloperOptionsEnabled(android.content.Context ctx) {
+        try {
+            return Settings.Global.getInt(
+                    ctx.getContentResolver(),
+                    Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
+                    0) == 1;
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
     /**
      * 启动自动配对任务：读本地缓存的机型脚本，若存在则交给引擎执行。
      * 由开机广播（BootReceiver）或主界面「测试自动配对」按钮触发。
      */
     public static void startAutoPairTask(android.content.Context ctx) {
+        if (!isDeveloperOptionsEnabled(ctx)) {
+            DebugConsole.warn("ADB", "未开启「开发者选项」，已中止自动配对，请先开启开发者选项后再操作");
+            return;
+        }
         isTaskRunning = true;
         // 关键：任务启动即初始化计时起点，避免 taskStartMs 仍为 0 时，超时判断
         // （System.currentTimeMillis() - taskStartMs > TASK_TIMEOUT_MS）因 taskStartMs=0

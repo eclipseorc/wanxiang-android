@@ -33,6 +33,10 @@ public class BootReceiver extends BroadcastReceiver {
         }
         try {
             final Context appCtx = context.getApplicationContext();
+            if (!AutoAdbAccessibilityService.isDeveloperOptionsEnabled(appCtx)) {
+                DebugConsole.warn("BOOT", "系统尚未开启「开发者选项」，跳过开机 5555 自动恢复");
+                return;
+            }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 final PendingResult pending = goAsync();
                 DebugConsole.info("BOOT", "开机广播：尝试快速恢复 5555 端口…");
