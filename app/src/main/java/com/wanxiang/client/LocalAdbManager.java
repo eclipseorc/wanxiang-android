@@ -3,6 +3,8 @@ package com.wanxiang.client;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.net.nsd.NsdManager;
+import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
@@ -74,6 +76,140 @@ public class LocalAdbManager {
     public interface Callback {
         void onSuccess();
         void onError(String err);
+    }
+
+    public interface WirelessPortCallback {
+        void onSuccess(int port);
+        void onError(String err);
+    }
+
+    /**
+     * 通过本机 NsdManager 发现本机当前的无线调试 TLS 端口（_adb-tls-connect._tcp.）。
+     * 只匹配本机 Wi-Fi IP 或 127.0.0.1，避免误命中同局域网其他手机的端口；
+     * 因在设备本机解析，不受路由器禁用组播/mDNS 影响。
+     */
+    @RequiresApi(api = Build.VERSION_CODES.R)
+    public static int discoverLocalWirelessPort(Context context, int timeoutMs) {
+        final NsdManager nsd = (NsdManager) context.getApplicationContext().getSystemService(Context.NSD_SERVICE);
+        if (nsd == null) {
+            return -1;
+        }
+        final String localIp = AdbReadyNotifier.getLocalWifiIp();
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicInteger foundPort = new java.util.concurrent.atomic.AtomicInteger(-1);
+
+        final NsdManager.DiscoveryListener listener = new NsdManager.DiscoveryListener() {
+            @Override
+            public void onDiscoveryStarted(String regType) {}
+
+            @Override
+            public void onServiceFound(NsdServiceInfo serviceInfo) {
+                if (foundPort.get() > 0) {
+                    return;
+                }
+                try {
+                    nsd.resolveService(serviceInfo, new NsdManager.ResolveListener() {
+                        @Override
+                        public void onResolveFailed(NsdServiceInfo info, int errorCode) {}
+
+                        @Override
+                        public void onServiceResolved(NsdServiceInfo info) {
+                            if (foundPort.get() > 0) {
+                                return;
+                            }
+                            java.net.InetAddress host = info.getHost();
+                            int port = info.getPort();
+                            if (host == null || port <= 0) {
+                                return;
+                            }
+                            String hostAddr = host.getHostAddress();
+                            if (host.isLoopbackAddress() || (localIp != null && !localIp.isEmpty() && localIp.equals(hostAddr))) {
+                                if (foundPort.compareAndSet(-1, port)) {
+                                    latch.countDown();
+                                }
+                            }
+                        }
+                    });
+                } catch (Throwable ignored) {
+                }
+            }
+
+            @Override
+            public void onServiceLost(NsdServiceInfo serviceInfo) {}
+
+            @Override
+            public void onDiscoveryStopped(String serviceType) {}
+
+            @Override
+            public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+                latch.countDown();
+            }
+
+            @Override
+            public void onStopDiscoveryFailed(String serviceType, int errorCode) {}
+        };
+
+        try {
+            nsd.discoverServices("_adb-tls-connect._tcp.", NsdManager.PROTOCOL_DNS_SD, listener);
+            latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Throwable ignored) {
+        } finally {
+            try {
+                nsd.stopServiceDiscovery(listener);
+            } catch (Throwable ignored) {
+            }
+        }
+        return foundPort.get();
+    }
+
+    /**
+     * 免 5555 静默恢复无线调试：利用服务端首次配对时授予的 WRITE_SECURE_SETTINGS，
+     * 直接开启系统无线调试开关并用本机 NsdManager 查出当前动态端口，上报给服务端直连。
+     */
+    @RequiresApi(api = Build.VERSION_CODES.R)
+    public static void trySilentEnableWireless(Context context, WirelessPortCallback cb) {
+        final Context appCtx = context.getApplicationContext();
+        executor.execute(() -> {
+            try {
+                boolean hasPerm = ContextCompat.checkSelfPermission(appCtx, Manifest.permission.WRITE_SECURE_SETTINGS)
+                        == PackageManager.PERMISSION_GRANTED;
+                if (!hasPerm) {
+                    cb.onError("未授予 WRITE_SECURE_SETTINGS");
+                    return;
+                }
+                Settings.Global.putInt(appCtx.getContentResolver(), "adb_wifi_enabled", 1);
+                DebugConsole.info("ADB", "已静默开启无线调试，正在本机查找动态端口…");
+                Thread.sleep(1500);
+                int port = discoverLocalWirelessPort(appCtx, 6000);
+                if (port > 0) {
+                    DebugConsole.success("ADB", "本机发现无线调试端口：" + port);
+                    cb.onSuccess(port);
+                } else {
+                    cb.onError("未能发现本机无线调试动态端口");
+                }
+            } catch (Exception e) {
+                cb.onError(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            }
+        });
+    }
+
+    /** 仅在无线调试已开启时异步探测本机动态端口（供 WebSocket 断网重连后主动上报最新 IP+端口）。 */
+    @RequiresApi(api = Build.VERSION_CODES.R)
+    public static void discoverWirelessPortIfEnabledAsync(Context context, WirelessPortCallback cb) {
+        final Context appCtx = context.getApplicationContext();
+        executor.execute(() -> {
+            try {
+                int wifiAdb = Settings.Global.getInt(appCtx.getContentResolver(), "adb_wifi_enabled", 0);
+                if (wifiAdb != 1) {
+                    return;
+                }
+                int port = discoverLocalWirelessPort(appCtx, 5000);
+                if (port > 0) {
+                    cb.onSuccess(port);
+                }
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     /** 检查 USB 调试总开关（adb_enabled）是否开启，未开启时给出诊断提示。 */

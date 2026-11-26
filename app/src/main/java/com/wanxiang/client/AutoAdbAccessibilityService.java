@@ -3,6 +3,7 @@ package com.wanxiang.client;
 import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -12,9 +13,14 @@ import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 无障碍服务（本地自配对）：利用无障碍服务自动完成
@@ -139,6 +145,107 @@ public class AutoAdbAccessibilityService extends AccessibilityService {
             Log.i(TAG, "reopened developer settings (null root recovery)");
         } catch (Throwable t) {
             Log.w(TAG, "reopen developer settings failed", t);
+        }
+    }
+
+    /**
+     * 极速抓取当前活跃窗口的可见控件树（耗时约 30~80ms，不受视频播放/动画干扰）。
+     * 若无障碍服务未开启或拿不到根节点，返回 null（调用方自动回退到 ADB uiautomator dump）。
+     */
+    public static JSONArray dumpUiTreeJson() {
+        AutoAdbAccessibilityService svc = instance;
+        if (svc == null) {
+            return null;
+        }
+        AccessibilityNodeInfo root = null;
+        try {
+            root = svc.getRootInActiveWindow();
+            if (root == null) {
+                return null;
+            }
+            JSONArray out = new JSONArray();
+            Set<String> seenBounds = new HashSet<>();
+            collectUiNodes(root, out, seenBounds, 0);
+            return out;
+        } catch (Throwable t) {
+            Log.w(TAG, "dumpUiTreeJson failed: " + t.getMessage());
+            return null;
+        } finally {
+            if (root != null) {
+                try {
+                    root.recycle();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    private static void collectUiNodes(AccessibilityNodeInfo node, JSONArray out, Set<String> seenBounds, int depth) {
+        if (node == null || depth > 40 || out.length() >= 150) {
+            return;
+        }
+        if (!node.isVisibleToUser()) {
+            return;
+        }
+        Rect r = new Rect();
+        node.getBoundsInScreen(r);
+        int w = r.width();
+        int h = r.height();
+
+        String text = node.getText() != null ? node.getText().toString().trim() : "";
+        if (text.length() > 120) {
+            text = text.substring(0, 120);
+        }
+        String desc = node.getContentDescription() != null ? node.getContentDescription().toString().trim() : "";
+        if (desc.length() > 120) {
+            desc = desc.substring(0, 120);
+        }
+        String resId = node.getViewIdResourceName() != null ? node.getViewIdResourceName().trim() : "";
+        String cls = node.getClassName() != null ? node.getClassName().toString() : "";
+        boolean clickable = node.isClickable() || node.isCheckable() || node.isEditable();
+
+        // 只保留有意义且具备有效尺寸的节点（可交互或含文本/描述/资源ID）
+        if (w > 4 && h > 4 && (clickable || !text.isEmpty() || !desc.isEmpty() || !resId.isEmpty())) {
+            String key = r.left + "," + r.top + "," + r.right + "," + r.bottom + "|" + text + "|" + desc;
+            if (!seenBounds.contains(key)) {
+                seenBounds.add(key);
+                try {
+                    JSONObject obj = new JSONObject();
+                    obj.put("text", text);
+                    obj.put("desc", desc);
+                    obj.put("resId", resId);
+                    obj.put("className", cls);
+                    obj.put("clickable", clickable);
+                    JSONArray bounds = new JSONArray();
+                    bounds.put(r.left);
+                    bounds.put(r.top);
+                    bounds.put(r.right);
+                    bounds.put(r.bottom);
+                    obj.put("bounds", bounds);
+                    obj.put("centerX", (r.left + r.right) / 2);
+                    obj.put("centerY", (r.top + r.bottom) / 2);
+                    out.put(obj);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            AccessibilityNodeInfo child = null;
+            try {
+                child = node.getChild(i);
+                if (child != null) {
+                    collectUiNodes(child, out, seenBounds, depth + 1);
+                }
+            } finally {
+                if (child != null) {
+                    try {
+                        child.recycle();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
         }
     }
 

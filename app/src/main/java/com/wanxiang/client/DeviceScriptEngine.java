@@ -2,9 +2,15 @@ package com.wanxiang.client;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Path;
 import android.graphics.Rect;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -926,23 +932,64 @@ public final class DeviceScriptEngine {
         int connectPort = (detectedConnectPort > 0 && detectedConnectPort != pairPort) ? detectedConnectPort : -1;
         Log.i(TAG, "pair code=" + code + " addr=" + addr + " pairPort=" + pairPort + " connectPort=" + connectPort);
         DebugConsole.info("STATE", "S6 读取到配对码 " + code + " 配对端口 " + pairPort
-                + "（主页连接端口 " + connectPort + "），开始本地配对");
-        LocalAdbManager.pairAndSwitchTo5555(service, pairPort, code, connectPort, new LocalAdbManager.Callback() {
-            @Override
-            public void onSuccess() {
-                DebugConsole.success("STATE", "本地配对成功，已固化 5555 端口");
-                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
-                AdbReadyNotifier.notifyAdbReady(service);
-                finishSuccess();
-            }
+                + "（主页连接端口 " + connectPort + "），发送给服务端执行免线自动配对…");
 
-            @Override
-            public void onError(String err) {
-                Log.e(TAG, "自动配对失败: " + err);
-                DebugConsole.error("STATE", "本地配对失败: " + err);
-                finishError("本地配对失败: " + err);
+        if (!ConnectionForegroundService.isConnected()) {
+            finishError("当前未连接服务端，无法发起服务端自动配对");
+            return;
+        }
+
+        final Handler mainHandler = new Handler(Looper.getMainLooper());
+        final boolean[] handled = {false};
+        final BroadcastReceiver[] receiverHolder = new BroadcastReceiver[1];
+        final Runnable timeoutTask = () -> {
+            if (handled[0]) {
+                return;
             }
-        });
+            handled[0] = true;
+            try {
+                if (receiverHolder[0] != null) {
+                    service.unregisterReceiver(receiverHolder[0]);
+                }
+            } catch (Throwable ignored) {
+            }
+            finishError("等待服务端配对回执超时（25秒），请确认手机与服务端在同一局域网");
+        };
+
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (handled[0]) {
+                    return;
+                }
+                handled[0] = true;
+                mainHandler.removeCallbacks(timeoutTask);
+                try {
+                    service.unregisterReceiver(this);
+                } catch (Throwable ignored) {
+                }
+                boolean ok = intent.getBooleanExtra(AdbReadyNotifier.EXTRA_PAIR_OK, false);
+                int port = intent.getIntExtra(AdbReadyNotifier.EXTRA_ADB_PORT, 0);
+                String err = intent.getStringExtra(AdbReadyNotifier.EXTRA_PAIR_ERROR);
+                if (ok) {
+                    DebugConsole.success("STATE", "服务端配对并连接成功（无线调试端口 " + port + "），已自动授权");
+                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
+                    finishSuccess();
+                } else {
+                    finishError("服务端配对失败: " + (err != null && !err.isEmpty() ? err : "未知错误"));
+                }
+            }
+        };
+        receiverHolder[0] = receiver;
+
+        IntentFilter filter = new IntentFilter(AdbReadyNotifier.ACTION_ADB_PAIR_RESULT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            service.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            service.registerReceiver(receiver, filter);
+        }
+        mainHandler.postDelayed(timeoutTask, 25_000L);
+        AdbReadyNotifier.notifyPairRequest(service, pairPort, code, connectPort);
     }
 
     private void finishSuccess() {

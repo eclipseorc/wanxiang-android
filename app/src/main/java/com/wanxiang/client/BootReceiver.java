@@ -39,13 +39,13 @@ public class BootReceiver extends BroadcastReceiver {
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 final PendingResult pending = goAsync();
-                DebugConsole.info("BOOT", "开机广播：尝试快速恢复 5555 端口…");
-                LocalAdbManager.trySilentSwitchTo5555(appCtx, new LocalAdbManager.Callback() {
+                DebugConsole.info("BOOT", "开机广播：尝试后台静默开启无线调试并上报动态端口…");
+                LocalAdbManager.trySilentEnableWireless(appCtx, new LocalAdbManager.WirelessPortCallback() {
                     @Override
-                    public void onSuccess() {
+                    public void onSuccess(int port) {
                         try {
-                            DebugConsole.success("BOOT", "开机快速恢复 5555 端口成功");
-                            AdbReadyNotifier.notifyAdbReady(appCtx);
+                            DebugConsole.success("BOOT", "开机静默恢复无线调试成功（端口 " + port + "）");
+                            AdbReadyNotifier.notifyAdbReady(appCtx, port);
                         } finally {
                             pending.finish();
                         }
@@ -54,8 +54,8 @@ public class BootReceiver extends BroadcastReceiver {
                     @Override
                     public void onError(String err) {
                         try {
-                            Log.i(TAG, "silent switch to 5555 unavailable (" + err + "), fallback to A11Y auto-pair");
-                            DebugConsole.info("BOOT", "快速恢复不可用（" + err + "），回退无障碍自动配对");
+                            Log.i(TAG, "silent wireless enable unavailable (" + err + "), fallback to A11Y auto-pair");
+                            DebugConsole.info("BOOT", "静默恢复不可用（" + err + "），回退无障碍自动配对");
                             AutoAdbAccessibilityService.startAutoPairTask(appCtx);
                         } finally {
                             pending.finish();

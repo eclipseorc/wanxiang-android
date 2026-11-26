@@ -263,21 +263,21 @@ public class SettingsFragment extends Fragment {
                     .show();
             return;
         }
-        DebugConsole.info("ADB", "手动触发 5555 端口恢复任务（优先尝试后台静默开启）");
+        DebugConsole.info("ADB", "手动触发无线调试恢复任务（优先尝试后台静默开启）");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (adbRecoverStatusView != null) {
                 adbRecoverStatusView.setVisibility(View.VISIBLE);
-                adbRecoverStatusView.setText("正在后台静默开启无线调试并固化 5555 端口…");
+                adbRecoverStatusView.setText("正在后台静默开启无线调试并探测端口…");
             }
-            LocalAdbManager.trySilentSwitchTo5555(appCtx, new LocalAdbManager.Callback() {
+            LocalAdbManager.trySilentEnableWireless(appCtx, new LocalAdbManager.WirelessPortCallback() {
                 @Override
-                public void onSuccess() {
-                    AdbReadyNotifier.notifyAdbReady(appCtx);
-                    DebugConsole.success("ADB", "后台静默开启并固化 5555 端口成功（无需打开设置界面）");
+                public void onSuccess(int port) {
+                    AdbReadyNotifier.notifyAdbReady(appCtx, port);
+                    DebugConsole.success("ADB", "后台静默开启无线调试成功（端口 " + port + "），已通知服务端直连");
                     if (isAdded() && adbRecoverStatusView != null) {
                         adbRecoverStatusView.post(() -> {
                             adbRecoverStatusView.setVisibility(View.VISIBLE);
-                            adbRecoverStatusView.setText("后台静默开启 5555 端口成功，已通知服务端连接！");
+                            adbRecoverStatusView.setText("后台静默开启无线调试成功（端口 " + port + "），已通知服务端连接！");
                             refreshAdbRecoverStatus();
                         });
                     }

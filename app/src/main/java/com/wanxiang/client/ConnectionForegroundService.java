@@ -85,13 +85,25 @@ public class ConnectionForegroundService extends Service {
     private Handler heartbeatHandler;
     private long reconnectDelayMs = RECONNECT_BASE_MS;
 
-    // 监听本地自配对完成广播，收到后用自己的 WebSocket 上报 adb-ready。
+    // 监听本地自配对/无线调试就绪广播，收到后用自己的 WebSocket 上报 adb-ready。
     private final BroadcastReceiver adbReadyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String lanIp = intent.getStringExtra(AdbReadyNotifier.EXTRA_LAN_IP);
             int port = intent.getIntExtra(AdbReadyNotifier.EXTRA_ADB_PORT, 5555);
             sendAdbReady(lanIp, port);
+        }
+    };
+
+    // 监听无障碍读取配对码后的服务端配对请求，收到后发给服务端执行 adb pair + connect。
+    private final BroadcastReceiver adbPairRequestReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String lanIp = intent.getStringExtra(AdbReadyNotifier.EXTRA_LAN_IP);
+            int pairPort = intent.getIntExtra(AdbReadyNotifier.EXTRA_PAIR_PORT, -1);
+            String code = intent.getStringExtra(AdbReadyNotifier.EXTRA_PAIR_CODE);
+            int connectPort = intent.getIntExtra(AdbReadyNotifier.EXTRA_CONNECT_PORT, -1);
+            sendAdbPairRequest(lanIp, pairPort, code, connectPort);
         }
     };
 
@@ -142,6 +154,12 @@ public class ConnectionForegroundService extends Service {
         } else {
             registerReceiver(adbReadyReceiver, filter);
         }
+        IntentFilter pairFilter = new IntentFilter(AdbReadyNotifier.ACTION_ADB_PAIR_REQUEST);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(adbPairRequestReceiver, pairFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(adbPairRequestReceiver, pairFilter);
+        }
         IntentFilter pullFilter = new IntentFilter(ACTION_PULL_SCRIPT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(pullScriptReceiver, pullFilter, Context.RECEIVER_NOT_EXPORTED);
@@ -184,6 +202,10 @@ public class ConnectionForegroundService extends Service {
             unregisterReceiver(adbReadyReceiver);
         } catch (IllegalArgumentException ignored) {
             // 极端生命周期下 receiver 未注册，忽略。
+        }
+        try {
+            unregisterReceiver(adbPairRequestReceiver);
+        } catch (IllegalArgumentException ignored) {
         }
         try {
             unregisterReceiver(pullScriptReceiver);
@@ -304,10 +326,27 @@ public class ConnectionForegroundService extends Service {
         }
     }
 
+    // detectAdbMode 判断当前 5555 端口是通过「无线调试(wireless)」还是「传统模式(tcpip)」开启：
+    // - Android 10 及以下无系统无线调试菜单，必为 tcpip；
+    // - Android 11+ 若存在本地无线配对密钥或系统无线调试开关已开启，则为 wireless，否则为 tcpip。
+    private String detectAdbMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return "tcpip";
+        }
+        try {
+            if (LocalAdbManager.SimpleAdbConnectionManager.hasPersistedKeys(this)) {
+                return "wireless";
+            }
+            if (Settings.Global.getInt(getContentResolver(), "adb_wifi_enabled", 0) == 1) {
+                return "wireless";
+            }
+        } catch (Throwable ignored) {
+        }
+        return "tcpip";
+    }
+
     // sendAdbReady 在本地自配对完成（固化 5555）后，通过 WebSocket 上报
-    // adb-ready 事件，服务端收到后执行 adb connect IP:5555。这是「ADB 就绪」的
-    // 一次性事件通知，与周期心跳无关；WebSocket 未连接时静默丢弃（服务端处理幂等，
-    // 下次心跳/重连后可再触发）。
+    // adb-ready 事件，服务端收到后执行 adb connect IP:5555。
     private void sendAdbReady(String lanIp, int port) {
         WebSocket ws = socket;
         if (ws == null) {
@@ -315,14 +354,42 @@ public class ConnectionForegroundService extends Service {
             return;
         }
         try {
+            String adbMode = (port > 0 && port != 5555) ? "wireless" : detectAdbMode();
             JSONObject msg = new JSONObject();
             msg.put("type", "adb-ready");
             msg.put("lan_ip", lanIp);
             msg.put("adb_port", port);
+            msg.put("adb_mode", adbMode);
             ws.send(msg.toString());
-            DebugConsole.info("WS", "已上报 adb-ready: " + lanIp + ":" + port);
+            DebugConsole.info("WS", "已上报 adb-ready: " + lanIp + ":" + port + " (" + adbMode + ")");
         } catch (Exception ignored) {
             // 发送失败不抛出。
+        }
+    }
+
+    // sendAdbPairRequest 把无障碍读取到的 6 位配对码发给服务端，由服务端直接执行 adb pair + connect，
+    // 让电脑端公钥正式写入手机信任列表（彻底免 USB 线、避免 unauthorized）。
+    private void sendAdbPairRequest(String lanIp, int pairPort, String code, int connectPort) {
+        WebSocket ws = socket;
+        if (ws == null || !connected) {
+            DebugConsole.warn("WS", "发送 adb-pair-request 时 WebSocket 未连接");
+            AdbReadyNotifier.notifyPairResult(this, false, 0, "WebSocket 未连接服务端");
+            return;
+        }
+        try {
+            String ip = (lanIp != null && !lanIp.isEmpty()) ? lanIp : getLocalIpAddress();
+            JSONObject msg = new JSONObject();
+            msg.put("type", "adb-pair-request");
+            msg.put("lan_ip", ip);
+            msg.put("pair_port", pairPort);
+            msg.put("code", code);
+            if (connectPort > 0) {
+                msg.put("connect_port", connectPort);
+            }
+            ws.send(msg.toString());
+            DebugConsole.info("WS", "已上报服务端配对请求: " + ip + ":" + pairPort + " (connectPort=" + connectPort + ")");
+        } catch (Exception e) {
+            AdbReadyNotifier.notifyPairResult(this, false, 0, "发送配对请求失败: " + e.getMessage());
         }
     }
 
@@ -556,8 +623,26 @@ public class ConnectionForegroundService extends Service {
             DebugConsole.success("WS", "WebSocket 已连接");
             // 连接建立后拉取本机机型脚本（按 model 匹配），供自动配对使用。
             pullDeviceScript();
-            // 若本机 5555 端口已处于监听状态（如服务端重启或 WS 断线重连），立即补报一次 adb-ready，
-            // 让服务端立刻执行 adb connect 恢复「自动模式 + 在线」，无需等待周期巡检。
+            // 断网重连或服务端重启后：Android 11+ 优先本机探测无线调试动态端口并上报（不受路由器禁 mDNS 影响），
+            // 否则若本机 5555 端口在监听则上报 5555。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                LocalAdbManager.discoverWirelessPortIfEnabledAsync(ConnectionForegroundService.this,
+                        new LocalAdbManager.WirelessPortCallback() {
+                            @Override
+                            public void onSuccess(int port) {
+                                String ip = AdbReadyNotifier.getLocalWifiIp();
+                                if (ip == null || ip.isEmpty()) {
+                                    ip = getLocalIpAddress();
+                                }
+                                if (ip != null && !ip.isEmpty()) {
+                                    sendAdbReady(ip, port);
+                                }
+                            }
+
+                            @Override
+                            public void onError(String err) {}
+                        });
+            }
             heartbeatHandler.post(() -> {
                 if (LocalAdbManager.isLocalPortListening(5555)) {
                     String ip = getLocalIpAddress();
@@ -589,6 +674,39 @@ public class ConnectionForegroundService extends Service {
                 // device-script：服务端下发本机机型脚本，写入本地缓存。
                 if ("device-script".equals(type)) {
                     handleDeviceScript(msg);
+                    return;
+                }
+                // adb-pair-ack：服务端完成 adb pair + connect 后的回执，转交给无障碍配对引擎。
+                if ("adb-pair-ack".equals(type)) {
+                    boolean ok = msg.optBoolean("ok", false);
+                    int port = msg.optInt("port", 0);
+                    String err = msg.optString("error", "");
+                    AdbReadyNotifier.notifyPairResult(ConnectionForegroundService.this, ok, port, err);
+                    return;
+                }
+                // dump-ui-tree：服务端请求极速抓取当前屏幕控件树（供 RPA 与 AI Agent 使用）。
+                if ("dump-ui-tree".equals(type)) {
+                    final String reqId = msg.optString("reqId", "");
+                    heartbeatHandler.post(() -> {
+                        try {
+                            org.json.JSONArray nodes = AutoAdbAccessibilityService.dumpUiTreeJson();
+                            JSONObject reply = new JSONObject();
+                            reply.put("type", "ui-tree-result");
+                            reply.put("reqId", reqId);
+                            if (nodes != null) {
+                                reply.put("ok", true);
+                                reply.put("nodes", nodes);
+                            } else {
+                                reply.put("ok", false);
+                                reply.put("error", "accessibility unavailable");
+                            }
+                            WebSocket ws = socket;
+                            if (ws != null) {
+                                ws.send(reply.toString());
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    });
                     return;
                 }
             } catch (Exception ignored) {
