@@ -310,7 +310,7 @@ public class SettingsFragment extends Fragment {
         AutoAdbAccessibilityService.startAutoPairTask(requireContext());
         if (adbRecoverStatusView != null) {
             adbRecoverStatusView.setVisibility(View.VISIBLE);
-            adbRecoverStatusView.setText("已触发首次无障碍配对，完成后将自动固化 5555 并开启后续后台静默恢复…");
+            adbRecoverStatusView.setText("已触发无障碍自动配对，完成后将自动授权并开启后台静默恢复…");
             adbRecoverStatusView.postDelayed(this::refreshAdbRecoverStatus, 3000L);
         }
     }
@@ -396,7 +396,7 @@ public class SettingsFragment extends Fragment {
         }
 
         checkExecutor.execute(() -> {
-            final boolean listening5555 = LocalAdbManager.isLocalPortListening(5555);
+            final int activePort = LocalAdbManager.getActiveAdbPort();
             if (!isAdded() || getActivity() == null) {
                 return;
             }
@@ -405,7 +405,7 @@ public class SettingsFragment extends Fragment {
                     return;
                 }
                 applyCheckPill(checkAdb5555Pill, checkAdb5555Dot, checkAdb5555View,
-                        listening5555, "监听中 (:5555)", "点击激活");
+                        activePort > 0, "监听中 (:" + activePort + ")", "点击激活");
             });
         });
     }

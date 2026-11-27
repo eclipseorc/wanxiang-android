@@ -969,12 +969,33 @@ public final class DeviceScriptEngine {
                 } catch (Throwable ignored) {
                 }
                 boolean ok = intent.getBooleanExtra(AdbReadyNotifier.EXTRA_PAIR_OK, false);
+                boolean paired = intent.getBooleanExtra(AdbReadyNotifier.EXTRA_PAIRED, ok);
                 int port = intent.getIntExtra(AdbReadyNotifier.EXTRA_ADB_PORT, 0);
                 String err = intent.getStringExtra(AdbReadyNotifier.EXTRA_PAIR_ERROR);
                 if (ok) {
                     DebugConsole.success("STATE", "服务端配对并连接成功（无线调试端口 " + port + "），已自动授权");
                     service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
                     finishSuccess();
+                } else if (paired && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // adb pair 已成功（电脑公钥已写入手机），仅因配对后动态端口变化导致直连旧端口失败；
+                    // 立刻由手机本机 NsdManager + TCP 探活找出最新端口并上报 adb-ready。
+                    DebugConsole.info("STATE", "服务端配对成功，正在本机探测最新无线调试连接端口…");
+                    LocalAdbManager.discoverWirelessPortIfEnabledAsync(service, new LocalAdbManager.WirelessPortCallback() {
+                        @Override
+                        public void onSuccess(int livePort) {
+                            DebugConsole.success("STATE", "本机发现最新无线调试端口 " + livePort + "，已上报服务端直连");
+                            AdbReadyNotifier.notifyAdbReady(service, livePort);
+                            mainHandler.post(() -> {
+                                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
+                                finishSuccess();
+                            });
+                        }
+
+                        @Override
+                        public void onError(String discoverErr) {
+                            mainHandler.post(() -> finishError("配对已成功，但本机探测新端口失败：" + discoverErr));
+                        }
+                    });
                 } else {
                     finishError("服务端配对失败: " + (err != null && !err.isEmpty() ? err : "未知错误"));
                 }

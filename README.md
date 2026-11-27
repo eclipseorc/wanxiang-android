@@ -1,7 +1,10 @@
 # 万象智控 Android 设备端
 
 设备端客户端：本地生成 deviceId 作为唯一凭证，向服务端换一次性 WebSocket ticket 后建立连接，并周期上报心跳（电量、RTT、状态），供管理后台展示设备在线与运行状态。
-万象智控安卓客户端引用了Genymobile的scrcpy项目，在此非常感谢!
+
+万象智控安卓客户端引用了[Genymobile](https://github.com/Genymobile)的[scrcpy](https://github.com/Genymobile/scrcpy)项目，在此非常感谢!
+
+![](C:\Users\Administrator\Downloads\Screenshot_20261126-223147.png)![](C:\Users\Administrator\Downloads\Screenshot_20261126-223159.png)
 
 ## 功能
 

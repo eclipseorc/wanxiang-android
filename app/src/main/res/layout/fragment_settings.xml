@@ -509,7 +509,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="ADB 5555 端口状态"
+                        android:text="ADB 端口状态"
                         android:textColor="@color/ink_2"
                         android:textSize="12.5sp" />
 
@@ -708,7 +708,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="开机或掉线时将自动静默开启 5555 端口并上报"
+                    android:text="连上后台或掉线时将自动静默恢复无线调试并上报端口"
                     android:textColor="@color/muted"
                     android:textSize="11sp"
                     android:visibility="gone" />
@@ -728,7 +728,7 @@
                         android:layout_marginRight="6dp"
                         android:insetTop="0dp"
                         android:insetBottom="0dp"
-                        android:text="触发 5555 自恢复"
+                        android:text="无线调试恢复"
                         android:textSize="12sp"
                         android:textStyle="bold"
                         app:cornerRadius="11dp"

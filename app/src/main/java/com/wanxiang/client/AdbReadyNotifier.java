@@ -37,6 +37,7 @@ public final class AdbReadyNotifier {
     public static final String EXTRA_PAIR_CODE = "pair_code";
     public static final String EXTRA_CONNECT_PORT = "connect_port";
     public static final String EXTRA_PAIR_OK = "pair_ok";
+    public static final String EXTRA_PAIRED = "paired";
     public static final String EXTRA_PAIR_ERROR = "pair_error";
 
     private AdbReadyNotifier() {
@@ -70,9 +71,10 @@ public final class AdbReadyNotifier {
     }
 
     /** 连接服务收到服务端 adb-pair-ack 后，把配对结果广播回无障碍配对引擎。 */
-    public static void notifyPairResult(Context context, boolean ok, int port, String error) {
+    public static void notifyPairResult(Context context, boolean ok, boolean paired, int port, String error) {
         Intent intent = new Intent(ACTION_ADB_PAIR_RESULT);
         intent.putExtra(EXTRA_PAIR_OK, ok);
+        intent.putExtra(EXTRA_PAIRED, paired);
         intent.putExtra(EXTRA_ADB_PORT, port);
         intent.putExtra(EXTRA_PAIR_ERROR, error == null ? "" : error);
         intent.setPackage(context.getPackageName());

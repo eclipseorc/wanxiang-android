@@ -274,7 +274,7 @@ public class HomeFragment extends Fragment {
 
         probeExecutor.execute(() -> {
             final String ip = AdbReadyNotifier.getLocalWifiIp();
-            final boolean listening5555 = LocalAdbManager.isLocalPortListening(5555);
+            final int activePort = LocalAdbManager.getActiveAdbPort();
             if (!isAdded() || getActivity() == null) {
                 return;
             }
@@ -290,11 +290,11 @@ public class HomeFragment extends Fragment {
                     homeLanIpView.setText((ip != null && !ip.isEmpty()) ? ip : "—");
                 }
                 if (homeAdbPortView != null) {
-                    if (listening5555) {
+                    if (activePort > 0) {
                         if (homeAdbDot != null) {
                             homeAdbDot.setBackgroundResource(R.drawable.bg_dot_success);
                         }
-                        homeAdbPortView.setText(":5555 就绪");
+                        homeAdbPortView.setText(":" + activePort + " 就绪");
                         homeAdbPortView.setTextColor(requireContext().getColor(R.color.success));
                     } else {
                         if (homeAdbDot != null) {

@@ -68,6 +68,9 @@ public class ConnectionForegroundService extends Service {
     private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
     private static final long RECONNECT_BASE_MS = 1_000L;
     private static final long RECONNECT_MAX_MS = 30_000L;
+    private static final long AUTO_HEAL_COOLDOWN_MS = 60_000L;
+
+    private volatile long lastAutoHealMs = 0L;
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
@@ -373,7 +376,7 @@ public class ConnectionForegroundService extends Service {
         WebSocket ws = socket;
         if (ws == null || !connected) {
             DebugConsole.warn("WS", "发送 adb-pair-request 时 WebSocket 未连接");
-            AdbReadyNotifier.notifyPairResult(this, false, 0, "WebSocket 未连接服务端");
+            AdbReadyNotifier.notifyPairResult(this, false, false, 0, "WebSocket 未连接服务端");
             return;
         }
         try {
@@ -389,7 +392,7 @@ public class ConnectionForegroundService extends Service {
             ws.send(msg.toString());
             DebugConsole.info("WS", "已上报服务端配对请求: " + ip + ":" + pairPort + " (connectPort=" + connectPort + ")");
         } catch (Exception e) {
-            AdbReadyNotifier.notifyPairResult(this, false, 0, "发送配对请求失败: " + e.getMessage());
+            AdbReadyNotifier.notifyPairResult(this, false, false, 0, "发送配对请求失败: " + e.getMessage());
         }
     }
 
@@ -419,8 +422,62 @@ public class ConnectionForegroundService extends Service {
         return "";
     }
 
-    // handleAdbStatus 处理后端下发的 adb-status 消息：adb 掉线时弹通知引导恢复，
-    // 恢复在线时撤销通知。这是「半自动重连」的核心：用户只需点通知 + 打开无线调试。
+    // tryAutoHealWirelessAdb 在 Android 11+ 上自动静默拉活无线调试（含死端口 0→1 重置与 TCP 探活）
+    // 并立即上报最新 IP:端口给服务端，实现「连上后台即可控屏、掉线自动自愈」零人工点击。
+    private void tryAutoHealWirelessAdb(boolean fromOfflineAlert, NotificationManager fallbackNm) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            if (fromOfflineAlert && fallbackNm != null) {
+                showAdbAlertNotification(fallbackNm);
+            }
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (fromOfflineAlert && (now - lastAutoHealMs) < AUTO_HEAL_COOLDOWN_MS) {
+            return;
+        }
+        lastAutoHealMs = now;
+        LocalAdbManager.trySilentEnableWireless(this, new LocalAdbManager.WirelessPortCallback() {
+            @Override
+            public void onSuccess(int port) {
+                String ip = AdbReadyNotifier.getLocalWifiIp();
+                if (ip == null || ip.isEmpty()) {
+                    ip = getLocalIpAddress();
+                }
+                if (ip != null && !ip.isEmpty()) {
+                    sendAdbReady(ip, port);
+                    DebugConsole.success("ADB", "后台已自动恢复无线调试并上报：" + ip + ":" + port);
+                }
+            }
+
+            @Override
+            public void onError(String err) {
+                // 未授 WRITE_SECURE_SETTINGS 时，若无线调试原本就开着则顺手探测上报一次。
+                LocalAdbManager.discoverWirelessPortIfEnabledAsync(ConnectionForegroundService.this,
+                        new LocalAdbManager.WirelessPortCallback() {
+                            @Override
+                            public void onSuccess(int port) {
+                                String ip = AdbReadyNotifier.getLocalWifiIp();
+                                if (ip == null || ip.isEmpty()) {
+                                    ip = getLocalIpAddress();
+                                }
+                                if (ip != null && !ip.isEmpty()) {
+                                    sendAdbReady(ip, port);
+                                }
+                            }
+
+                            @Override
+                            public void onError(String ignored) {}
+                        });
+                if (fromOfflineAlert && fallbackNm != null) {
+                    DebugConsole.warn("ADB", "后台静默自愈未完成（" + err + "），弹出人工恢复提醒");
+                    showAdbAlertNotification(fallbackNm);
+                }
+            }
+        });
+    }
+
+    // handleAdbStatus 处理后端下发的 adb-status 消息：adb 掉线时优先后台静默自愈，
+    // 自愈失败再弹通知引导恢复；恢复在线时撤销通知。
     private void handleAdbStatus(org.json.JSONObject data) {
         if (data == null) {
             return;
@@ -435,8 +492,8 @@ public class ConnectionForegroundService extends Service {
             DebugConsole.info("ADB", "服务端通知：ADB 已恢复在线");
             return;
         }
-        DebugConsole.warn("ADB", "服务端通知：ADB 掉线，需恢复无线调试");
-        showAdbAlertNotification(nm);
+        DebugConsole.warn("ADB", "服务端通知：ADB 掉线，尝试后台自动静默恢复无线调试…");
+        tryAutoHealWirelessAdb(true, nm);
     }
 
     // pullDeviceScript 连接建立后请求服务端下发本机机型脚本（按 model 匹配）。
@@ -623,25 +680,10 @@ public class ConnectionForegroundService extends Service {
             DebugConsole.success("WS", "WebSocket 已连接");
             // 连接建立后拉取本机机型脚本（按 model 匹配），供自动配对使用。
             pullDeviceScript();
-            // 断网重连或服务端重启后：Android 11+ 优先本机探测无线调试动态端口并上报（不受路由器禁 mDNS 影响），
-            // 否则若本机 5555 端口在监听则上报 5555。
+            // 每次连上服务端（电脑重启/断网重连后）：Android 11+ 自动在后台静默拉活无线调试并上报可用端口；
+            // Android 10 及以下若本机 5555 在监听则上报 5555。
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                LocalAdbManager.discoverWirelessPortIfEnabledAsync(ConnectionForegroundService.this,
-                        new LocalAdbManager.WirelessPortCallback() {
-                            @Override
-                            public void onSuccess(int port) {
-                                String ip = AdbReadyNotifier.getLocalWifiIp();
-                                if (ip == null || ip.isEmpty()) {
-                                    ip = getLocalIpAddress();
-                                }
-                                if (ip != null && !ip.isEmpty()) {
-                                    sendAdbReady(ip, port);
-                                }
-                            }
-
-                            @Override
-                            public void onError(String err) {}
-                        });
+                tryAutoHealWirelessAdb(false, null);
             }
             heartbeatHandler.post(() -> {
                 if (LocalAdbManager.isLocalPortListening(5555)) {
@@ -679,9 +721,10 @@ public class ConnectionForegroundService extends Service {
                 // adb-pair-ack：服务端完成 adb pair + connect 后的回执，转交给无障碍配对引擎。
                 if ("adb-pair-ack".equals(type)) {
                     boolean ok = msg.optBoolean("ok", false);
+                    boolean paired = msg.optBoolean("paired", ok);
                     int port = msg.optInt("port", 0);
                     String err = msg.optString("error", "");
-                    AdbReadyNotifier.notifyPairResult(ConnectionForegroundService.this, ok, port, err);
+                    AdbReadyNotifier.notifyPairResult(ConnectionForegroundService.this, ok, paired, port, err);
                     return;
                 }
                 // dump-ui-tree：服务端请求极速抓取当前屏幕控件树（供 RPA 与 AI Agent 使用）。

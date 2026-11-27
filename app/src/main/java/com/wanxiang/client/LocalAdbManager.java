@@ -83,10 +83,24 @@ public class LocalAdbManager {
         void onError(String err);
     }
 
+    /** 最近一次本机探活通过的无线调试动态端口，供主页与设置页秒级展示状态。 */
+    private static volatile int lastVerifiedWirelessPort = -1;
+
+    /** 返回当前本机真实处于监听状态的 ADB 端口（优先返回无线调试动态端口，其次 5555，均未监听返回 -1）。 */
+    public static int getActiveAdbPort() {
+        int wp = lastVerifiedWirelessPort;
+        if (wp > 0 && isLocalPortListening(wp)) {
+            return wp;
+        }
+        if (isLocalPortListening(5555)) {
+            return 5555;
+        }
+        return -1;
+    }
+
     /**
-     * 通过本机 NsdManager 发现本机当前的无线调试 TLS 端口（_adb-tls-connect._tcp.）。
-     * 只匹配本机 Wi-Fi IP 或 127.0.0.1，避免误命中同局域网其他手机的端口；
-     * 因在设备本机解析，不受路由器禁用组播/mDNS 影响。
+     * 通过本机 NsdManager 发现本机当前的无线调试 TLS 端口（_adb-tls-connect._tcp.），
+     * 并对查到的端口做真实 TCP 探活，彻底过滤系统残留的死端口缓存。
      */
     @RequiresApi(api = Build.VERSION_CODES.R)
     public static int discoverLocalWirelessPort(Context context, int timeoutMs) {
@@ -123,8 +137,11 @@ public class LocalAdbManager {
                                 return;
                             }
                             String hostAddr = host.getHostAddress();
-                            if (host.isLoopbackAddress() || (localIp != null && !localIp.isEmpty() && localIp.equals(hostAddr))) {
+                            boolean isSelf = host.isLoopbackAddress()
+                                    || (localIp != null && !localIp.isEmpty() && localIp.equals(hostAddr));
+                            if (isSelf && isLocalPortListening(port)) {
                                 if (foundPort.compareAndSet(-1, port)) {
+                                    lastVerifiedWirelessPort = port;
                                     latch.countDown();
                                 }
                             }
@@ -163,8 +180,10 @@ public class LocalAdbManager {
     }
 
     /**
-     * 免 5555 静默恢复无线调试：利用服务端首次配对时授予的 WRITE_SECURE_SETTINGS，
-     * 直接开启系统无线调试开关并用本机 NsdManager 查出当前动态端口，上报给服务端直连。
+     * 免 5555 静默恢复无线调试：
+     * 1. 若无线调试已开启且存在真实可连端口，直接返回；
+     * 2. 否则强制 0 → 600ms → 1 重置系统无线调试开关（解决休眠后「假开启 / 死端口」问题），
+     *    再通过 NsdManager + TCP 探活获取全新可用端口并上报服务端。
      */
     @RequiresApi(api = Build.VERSION_CODES.R)
     public static void trySilentEnableWireless(Context context, WirelessPortCallback cb) {
@@ -177,15 +196,28 @@ public class LocalAdbManager {
                     cb.onError("未授予 WRITE_SECURE_SETTINGS");
                     return;
                 }
+                int curState = Settings.Global.getInt(appCtx.getContentResolver(), "adb_wifi_enabled", 0);
+                if (curState == 1) {
+                    int existingPort = discoverLocalWirelessPort(appCtx, 2500);
+                    if (existingPort > 0) {
+                        DebugConsole.success("ADB", "无线调试端口已就绪（探活通过）：" + existingPort);
+                        cb.onSuccess(existingPort);
+                        return;
+                    }
+                    DebugConsole.warn("ADB", "检测到无线调试处于「假开启/死端口」状态，强制重置开关（0→1）…");
+                } else {
+                    DebugConsole.info("ADB", "无线调试当前已关闭，后台静默开启中…");
+                }
+                Settings.Global.putInt(appCtx.getContentResolver(), "adb_wifi_enabled", 0);
+                Thread.sleep(600);
                 Settings.Global.putInt(appCtx.getContentResolver(), "adb_wifi_enabled", 1);
-                DebugConsole.info("ADB", "已静默开启无线调试，正在本机查找动态端口…");
-                Thread.sleep(1500);
-                int port = discoverLocalWirelessPort(appCtx, 6000);
+                Thread.sleep(1600);
+                int port = discoverLocalWirelessPort(appCtx, 6500);
                 if (port > 0) {
-                    DebugConsole.success("ADB", "本机发现无线调试端口：" + port);
+                    DebugConsole.success("ADB", "本机发现并验证可用无线调试端口：" + port);
                     cb.onSuccess(port);
                 } else {
-                    cb.onError("未能发现本机无线调试动态端口");
+                    cb.onError("重启无线调试后未能探测到可用端口");
                 }
             } catch (Exception e) {
                 cb.onError(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
@@ -193,7 +225,7 @@ public class LocalAdbManager {
         });
     }
 
-    /** 仅在无线调试已开启时异步探测本机动态端口（供 WebSocket 断网重连后主动上报最新 IP+端口）。 */
+    /** 仅在无线调试已开启时异步探测本机可用动态端口（含 TCP 探活）。 */
     @RequiresApi(api = Build.VERSION_CODES.R)
     public static void discoverWirelessPortIfEnabledAsync(Context context, WirelessPortCallback cb) {
         final Context appCtx = context.getApplicationContext();
@@ -201,11 +233,14 @@ public class LocalAdbManager {
             try {
                 int wifiAdb = Settings.Global.getInt(appCtx.getContentResolver(), "adb_wifi_enabled", 0);
                 if (wifiAdb != 1) {
+                    cb.onError("系统无线调试开关未开启");
                     return;
                 }
-                int port = discoverLocalWirelessPort(appCtx, 5000);
+                int port = discoverLocalWirelessPort(appCtx, 5500);
                 if (port > 0) {
                     cb.onSuccess(port);
+                } else {
+                    cb.onError("未探测到可用的无线调试端口");
                 }
             } catch (Throwable ignored) {
             }
