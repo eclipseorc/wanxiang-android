@@ -4,7 +4,10 @@
 
 万象智控安卓客户端引用了[Genymobile](https://github.com/Genymobile)的[scrcpy](https://github.com/Genymobile/scrcpy)项目，在此非常感谢!
 
-![](D:\work\wanxiang\wanxiang-android\docs\Screenshot_20261126-223147.png)![](D:\work\wanxiang\wanxiang-android\docs\Screenshot_20261126-223159.png)
+<p>
+  <img src="docs/Screenshot_20261126-223147.png" width="280" alt="主页截图" />
+  <img src="docs/Screenshot_20261126-223159.png" width="280" alt="设置页截图" />
+</p>
 
 ## 功能
 
